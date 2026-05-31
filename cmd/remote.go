@@ -6,8 +6,8 @@ import (
 	"os"
 	"strings"
 
-	"ft/config"
-	"ft/util"
+	"github.com/Kelvris/ft/config"
+	"github.com/Kelvris/ft/util"
 
 	"github.com/spf13/cobra"
 )

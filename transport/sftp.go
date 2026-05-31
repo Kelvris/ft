@@ -14,7 +14,7 @@ import (
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
 
-	"ft/config"
+	"github.com/Kelvris/ft/config"
 )
 
 type sftpTransport struct {

@@ -3,9 +3,9 @@ package cmd
 import (
 	"fmt"
 
-	"ft/config"
-	"ft/index"
-	"ft/util"
+	"github.com/Kelvris/ft/config"
+	"github.com/Kelvris/ft/index"
+	"github.com/Kelvris/ft/util"
 
 	"github.com/spf13/cobra"
 )

@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"os"
 
-	"ft/config"
-	"ft/transport"
-	"ft/version"
+	"github.com/Kelvris/ft/config"
+	"github.com/Kelvris/ft/transport"
+	"github.com/Kelvris/ft/version"
 
 	"github.com/spf13/cobra"
 )

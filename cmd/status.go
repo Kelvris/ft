@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"ft/index"
+	"github.com/Kelvris/ft/index"
 
 	"github.com/spf13/cobra"
 )

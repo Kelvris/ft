@@ -11,7 +11,7 @@ import (
 
 	"github.com/jlaffaye/ftp"
 
-	"ft/config"
+	"github.com/Kelvris/ft/config"
 )
 
 type ftpTransport struct {

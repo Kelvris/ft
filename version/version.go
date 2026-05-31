@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"ft/index"
-	"ft/transport"
-	"ft/util"
+	"github.com/Kelvris/ft/index"
+	"github.com/Kelvris/ft/transport"
+	"github.com/Kelvris/ft/util"
 )
 
 type Snapshot struct {

@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	"ft/util"
+	"github.com/Kelvris/ft/util"
 )
 
 type Remote struct {

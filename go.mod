@@ -1,4 +1,4 @@
-module ft
+module github.com/Kelvris/ft
 
 go 1.25.0
 

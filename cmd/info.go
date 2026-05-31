@@ -5,11 +5,11 @@ import (
 	"os"
 	"path/filepath"
 
-	"ft/config"
-	"ft/index"
-	"ft/transport"
-	"ft/util"
-	"ft/version"
+	"github.com/Kelvris/ft/config"
+	"github.com/Kelvris/ft/index"
+	"github.com/Kelvris/ft/transport"
+	"github.com/Kelvris/ft/util"
+	"github.com/Kelvris/ft/version"
 
 	"github.com/spf13/cobra"
 )

@@ -1,6 +1,6 @@
 package main
 
-import "ft/cmd"
+import "github.com/Kelvris/ft/cmd"
 
 func main() {
 	cmd.Execute()

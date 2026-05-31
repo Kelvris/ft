@@ -5,8 +5,8 @@ import (
 	"os"
 	"testing"
 
-	"ft/config"
-	"ft/index"
+	"github.com/Kelvris/ft/config"
+	"github.com/Kelvris/ft/index"
 )
 
 func TestConfigParsing(t *testing.T) {

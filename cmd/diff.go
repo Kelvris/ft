@@ -6,9 +6,9 @@ import (
 	"os/exec"
 	"path/filepath"
 
-	"ft/config"
-	"ft/index"
-	"ft/transport"
+	"github.com/Kelvris/ft/config"
+	"github.com/Kelvris/ft/index"
+	"github.com/Kelvris/ft/transport"
 
 	"github.com/spf13/cobra"
 )

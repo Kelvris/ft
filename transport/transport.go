@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"io"
 
-	"ft/config"
-	"ft/index"
+	"github.com/Kelvris/ft/config"
+	"github.com/Kelvris/ft/index"
 )
 
 type DirEntry struct {

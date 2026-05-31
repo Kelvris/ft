@@ -12,7 +12,7 @@ import (
 	"sort"
 	"strings"
 
-	"ft/util"
+	"github.com/Kelvris/ft/util"
 )
 
 type FileEntry struct {
