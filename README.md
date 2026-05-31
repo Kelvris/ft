@@ -18,13 +18,13 @@
 ## Install
 
 ```bash
-go install github.com/yourname/ft@latest
+go install github.com/Kelvris/ft@latest
 ```
 
 Or build from source:
 
 ```bash
-git clone https://github.com/yourname/ft.git
+git clone https://github.com/Kelvris/ft.git
 cd ft
 go build -o /usr/local/bin/ft .
 ```
