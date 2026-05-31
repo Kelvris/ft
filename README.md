@@ -172,4 +172,4 @@ Versions are synced to the remote server under `.ft/versions/`.
 
 ## License
 
-MIT
+[MIT](LICENSE)
