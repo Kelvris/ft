@@ -1,5 +1,7 @@
 # ft — Git-like FTP/SFTP sync tool
 
+[![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 `ft` syncs local files with remote servers via **FTP** or **SFTP** using familiar Git-like commands. Built for developers who deploy to shared hosting without shell access.
 
 ## Features
@@ -172,4 +174,4 @@ Versions are synced to the remote server under `.ft/versions/`.
 
 ## License
 
-[MIT](LICENSE)
+MIT
