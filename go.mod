@@ -1,13 +1,13 @@
 module github.com/Kelvris/ft
 
-go 1.25.0
+go 1.26.0
 
 require (
 	github.com/jlaffaye/ftp v0.2.0
-	github.com/pkg/sftp v1.13.7
+	github.com/pkg/sftp v1.13.10
 	github.com/spf13/cobra v1.10.2
-	golang.org/x/crypto v0.23.0
-	golang.org/x/term v0.20.0
+	golang.org/x/crypto v0.52.0
+	golang.org/x/term v0.43.0
 )
 
 require (
