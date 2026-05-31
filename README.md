@@ -21,7 +21,7 @@ If you have a website on shared hosting (like InfinityFree, Hostinger, etc.) and
 
 ## Prerequisites
 
-You need **Go** installed to install `ft`.
+You need **Go 1.26+** installed to install `ft`.
 
 ### Installing Go
 
@@ -30,6 +30,8 @@ You need **Go** installed to install `ft`.
 3. Run the installer
 4. Open a new terminal and type `go version` to verify it's installed
 
+> **Minimum requirement: Go 1.26** — older versions won't work.
+>
 > On Linux you can also use your package manager:
 > ```bash
 > sudo apt install golang-go   # Debian/Ubuntu
