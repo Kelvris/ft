@@ -49,7 +49,7 @@ func (t *ftpTransport) Connect() error {
 	return nil
 }
 
-func (t *ftpTransport) ensureRemoteDir(client *ftp.ServerConn, dir string) {
+func (t *ftpTransport) ensureRemoteDir(client *ftp.ServerConn, dir string) error {
 	parts := strings.Split(strings.Trim(dir, "/"), "/")
 	current := ""
 	for _, part := range parts {
@@ -58,8 +58,11 @@ func (t *ftpTransport) ensureRemoteDir(client *ftp.ServerConn, dir string) {
 		} else {
 			current += "/" + part
 		}
-		_ = client.MakeDir(current)
+		if err := client.MakeDir(current); err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
 func (t *ftpTransport) Close() error {
@@ -195,6 +198,5 @@ func (t *ftpTransport) WriteFile(remoteRelPath string, data []byte) error {
 }
 
 func (t *ftpTransport) EnsureDir(remoteRelPath string) error {
-	t.ensureRemoteDir(t.client, t.remotePath(remoteRelPath))
-	return nil
+	return t.ensureRemoteDir(t.client, t.remotePath(remoteRelPath))
 }

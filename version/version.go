@@ -165,16 +165,29 @@ func Revert(name string, t transport.Transport, remotePath string) error {
 
 		if _, err := os.Stat(deletedPath); err == nil {
 			dest := filepath.Dir(localPath)
-			os.MkdirAll(dest, 0755)
-			data, _ := os.ReadFile(deletedPath)
-			os.WriteFile(localPath, data, 0644)
+			if err := os.MkdirAll(dest, 0755); err != nil {
+				failed++
+				continue
+			}
+			data, err := os.ReadFile(deletedPath)
+			if err != nil {
+				failed++
+				continue
+			}
+			if err := os.WriteFile(localPath, data, 0644); err != nil {
+				failed++
+				continue
+			}
 			restored++
 			continue
 		}
 
 		if t != nil {
 			dest := filepath.Dir(localPath)
-			os.MkdirAll(dest, 0755)
+			if err := os.MkdirAll(dest, 0755); err != nil {
+				failed++
+				continue
+			}
 			if err := t.Download(path, localPath, nil); err == nil {
 				restored++
 				continue
@@ -184,7 +197,7 @@ func Revert(name string, t transport.Transport, remotePath string) error {
 		failed++
 	}
 
-	idx, err := index.New(), nil
+	idx := index.New()
 	*idx = *verIdx
 	if err := idx.Save(); err != nil {
 		return fmt.Errorf("saving reverted index: %w", err)
@@ -199,7 +212,10 @@ func BackupDeletedFiles(name string, paths []string, t transport.Transport) erro
 	dir := DeletedFilesDir(name)
 	for _, p := range paths {
 		dest := filepath.Join(dir, p)
-		os.MkdirAll(filepath.Dir(dest), 0755)
+		if err := os.MkdirAll(filepath.Dir(dest), 0755); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: creating backup dir for %s: %v\n", p, err)
+			continue
+		}
 		if err := t.Download(p, dest, nil); err != nil {
 			fmt.Fprintf(os.Stderr, "warning: backing up deleted %s: %v\n", p, err)
 		}

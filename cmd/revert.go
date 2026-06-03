@@ -47,7 +47,9 @@ If no name is given, shows an interactive picker.`,
 			return fmt.Errorf("no remote configured")
 		}
 
-		resolvePassword(remote, "origin")
+		if err := resolvePassword(remote, "origin"); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: resolving password: %v\n", err)
+		}
 
 		t, err := transport.NewTransport(remote)
 		if err != nil {

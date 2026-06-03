@@ -56,10 +56,16 @@ Specify files to pull selectively:
 		}
 
 		if _, err := os.Stat(util.FtDir); os.IsNotExist(err) {
-			os.MkdirAll(util.FtDir, 0755)
-			index.New().Save()
+			if err := os.MkdirAll(util.FtDir, 0755); err != nil {
+				return fmt.Errorf("creating .ft directory: %w", err)
+			}
+			if err := index.New().Save(); err != nil {
+				return fmt.Errorf("saving index: %w", err)
+			}
 			cfg := &config.Config{Remotes: make(map[string]*config.Remote)}
-			cfg.Save()
+			if err := cfg.Save(); err != nil {
+				return fmt.Errorf("saving config: %w", err)
+			}
 			if !pullQuiet {
 				fmt.Println("auto-initialized empty ft project")
 			}

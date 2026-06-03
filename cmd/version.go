@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/Kelvris/ft/config"
 	"github.com/Kelvris/ft/index"
@@ -40,12 +41,11 @@ var versionLsCmd = &cobra.Command{
 			fmt.Println()
 		}
 
-		cfg, err := config.LoadConfig()
-		if err == nil {
+		if cfg, err := config.LoadConfig(); err == nil {
 			if r, exists := cfg.Remotes[remoteName]; exists {
-				resolvePassword(r, remoteName)
-				t, err := transport.NewTransport(r)
-				if err == nil {
+				if err := resolvePassword(r, remoteName); err != nil {
+					fmt.Fprintf(os.Stderr, "warning: resolving password: %v\n", err)
+				} else if t, err := transport.NewTransport(r); err == nil {
 					if err := t.Connect(); err == nil {
 						defer t.Close()
 						remote, _ := version.ListRemote(t)

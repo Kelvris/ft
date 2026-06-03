@@ -100,9 +100,8 @@ func showInlineDiff(t transport.Transport, path string) {
 	}
 	defer os.RemoveAll(tmpDir)
 
-	remotePath := filepath.FromSlash(path)
 	localPath := filepath.FromSlash(path)
-	tmpFile := filepath.Join(tmpDir, remotePath)
+	tmpFile := filepath.Join(tmpDir, localPath)
 
 	if err := os.MkdirAll(filepath.Dir(tmpFile), 0755); err != nil {
 		return

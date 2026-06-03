@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"path"
+	"sort"
 	"strings"
 
 	"github.com/Kelvris/ft/config"
@@ -39,9 +40,14 @@ Examples:
 				remotePath = "/" + parts[1]
 			}
 		} else {
+			// Pick first remote alphabetically for deterministic behavior
+			var names []string
 			for name := range cfg.Remotes {
-				remoteName = name
-				break
+				names = append(names, name)
+			}
+			if len(names) > 0 {
+				sort.Strings(names)
+				remoteName = names[0]
 			}
 			remotePath = ""
 		}

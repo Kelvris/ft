@@ -68,10 +68,16 @@ You can specify specific files/directories to push selectively:
 		}
 
 		if _, err := os.Stat(util.FtDir); os.IsNotExist(err) {
-			os.MkdirAll(util.FtDir, 0755)
-			index.New().Save()
+			if err := os.MkdirAll(util.FtDir, 0755); err != nil {
+				return fmt.Errorf("creating .ft directory: %w", err)
+			}
+			if err := index.New().Save(); err != nil {
+				return fmt.Errorf("saving index: %w", err)
+			}
 			cfg := &config.Config{Remotes: make(map[string]*config.Remote)}
-			cfg.Save()
+			if err := cfg.Save(); err != nil {
+				return fmt.Errorf("saving config: %w", err)
+			}
 			if !pushQuiet {
 				fmt.Println("auto-initialized empty ft project")
 			}
@@ -200,7 +206,9 @@ You can specify specific files/directories to push selectively:
 						return
 					}
 					if versionName != "" {
-						saveVersionFile(versionName, path)
+						if err := saveVersionFile(versionName, path); err != nil {
+							fmt.Fprintf(os.Stderr, "warning: saving version file %s: %v\n", path, err)
+						}
 					}
 				}
 			}(i)
@@ -273,14 +281,17 @@ You can specify specific files/directories to push selectively:
 	},
 }
 
-func saveVersionFile(versionName, path string) {
+func saveVersionFile(versionName, path string) error {
 	src := filepath.FromSlash(path)
 	dst := version.VersionPath(versionName, "files", path)
-	os.MkdirAll(filepath.Dir(dst), 0755)
-	data, err := os.ReadFile(src)
-	if err == nil {
-		os.WriteFile(dst, data, 0644)
+	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
+		return err
 	}
+	data, err := os.ReadFile(src)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(dst, data, 0644)
 }
 
 func syncVersionToRemote(versionName string, t transport.Transport) {
@@ -289,13 +300,16 @@ func syncVersionToRemote(versionName string, t transport.Transport) {
 		if err != nil || info.IsDir() {
 			return nil
 		}
-		rel, _ := filepath.Rel(localDir, p)
-		remoteRel := ".ft/versions/" + versionName + "/" + filepath.ToSlash(rel)
-		data, _ := os.ReadFile(p)
-		if data != nil {
-			t.WriteFile(remoteRel, data)
+		rel, err := filepath.Rel(localDir, p)
+		if err != nil {
+			return nil
 		}
-		return nil
+		remoteRel := ".ft/versions/" + versionName + "/" + filepath.ToSlash(rel)
+		data, err := os.ReadFile(p)
+		if err != nil {
+			return nil
+		}
+		return t.WriteFile(remoteRel, data)
 	})
 }
 

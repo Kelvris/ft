@@ -10,6 +10,7 @@ import (
 	"github.com/Kelvris/ft/util"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
 func promptPassword() (string, error) {
@@ -136,11 +137,12 @@ var remoteSetPasswordCmd = &cobra.Command{
 		}
 
 		fmt.Print("Enter password: ")
-		scanner := bufio.NewScanner(os.Stdin)
-		if !scanner.Scan() {
-			return scanner.Err()
+		passwordBytes, err := term.ReadPassword(int(os.Stdin.Fd()))
+		fmt.Println()
+		if err != nil {
+			return fmt.Errorf("reading password: %w", err)
 		}
-		password := strings.TrimSpace(scanner.Text())
+		password := string(passwordBytes)
 
 		id, err := util.SavePassword(name, password)
 		if err != nil {

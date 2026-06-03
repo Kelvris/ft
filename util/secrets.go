@@ -26,6 +26,7 @@ func GenerateSecretID() string {
 }
 
 func SavePassword(remoteName, password string) (string, error) {
+	ensureSecretsDir()
 	id := GenerateSecretID()
 	dir := SecretsPath(id)
 	if err := os.MkdirAll(dir, 0700); err != nil {
@@ -110,6 +111,7 @@ func RotateSecret(remoteName string) error {
 }
 
 func ClearPassword(remoteName string) error {
+	ensureSecretsDir()
 	id, err := loadRegistry(remoteName)
 	if err != nil {
 		return err
@@ -168,6 +170,6 @@ func writeRegistry(remotes map[string]string) error {
 	return os.WriteFile(registryPath(), data, 0600)
 }
 
-func init() {
+func ensureSecretsDir() {
 	os.MkdirAll(SecretsPath(), 0700)
 }
