@@ -82,7 +82,10 @@ func appendLog(action, remote string, files []string, status string) error {
 
 	data, err := os.ReadFile(path)
 	if err == nil {
-		json.Unmarshal(data, &entries)
+		if parseErr := json.Unmarshal(data, &entries); parseErr != nil {
+			fmt.Fprintf(os.Stderr, "warning: corrupt log file, resetting: %v\n", parseErr)
+			entries = nil
+		}
 	}
 
 	entries = append(entries, entry)

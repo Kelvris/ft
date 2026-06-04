@@ -130,7 +130,7 @@ func LoadVersionIndex(name string) (*index.Index, error) {
 	if err := json.Unmarshal(data, &container); err != nil {
 		var idx index.Index
 		if err2 := json.Unmarshal(data, &idx); err2 != nil {
-			return nil, fmt.Errorf("parsing version index: %w", err)
+			return nil, fmt.Errorf("parsing version index: %w (container: %v)", err2, err)
 		}
 		if idx.Files == nil {
 			idx.Files = make(map[string]*index.FileEntry)

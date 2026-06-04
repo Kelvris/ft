@@ -13,6 +13,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var diffPassword bool
+
 var diffCmd = &cobra.Command{
 	Use:   "diff [remote]",
 	Short: "Compare local files against remote",
@@ -35,6 +37,7 @@ For modified files, shows a unified diff if 'diff' is available.`,
 			return fmt.Errorf("remote %q not found", remoteName)
 		}
 
+		pullPassword = diffPassword // Share the pull password flag for diff
 		if err := resolvePullPassword(remote, remoteName); err != nil {
 			return err
 		}
@@ -96,6 +99,7 @@ For modified files, shows a unified diff if 'diff' is available.`,
 func showInlineDiff(t transport.Transport, path string) {
 	tmpDir, err := os.MkdirTemp("", "ft-diff-")
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: creating temp dir for diff: %v\n", err)
 		return
 	}
 	defer os.RemoveAll(tmpDir)
@@ -104,20 +108,28 @@ func showInlineDiff(t transport.Transport, path string) {
 	tmpFile := filepath.Join(tmpDir, localPath)
 
 	if err := os.MkdirAll(filepath.Dir(tmpFile), 0755); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: creating temp dirs for diff: %v\n", err)
 		return
 	}
 
 	if err := t.Download(path, tmpFile, nil); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: downloading remote file for diff: %v\n", err)
 		return
 	}
 
 	cmd := exec.Command("diff", "-u", "--label", "local/"+path, "--label", "remote/"+path, localPath, tmpFile)
 	out, err := cmd.Output()
-	if err == nil || len(out) > 0 {
-		fmt.Print(string(out))
+	if err != nil {
+		// diff exits with non-zero when files differ, that's expected
+		if len(out) == 0 {
+			fmt.Fprintf(os.Stderr, "warning: diff command failed: %v\n", err)
+			return
+		}
 	}
+	fmt.Print(string(out))
 }
 
 func init() {
+	diffCmd.Flags().BoolVarP(&diffPassword, "password", "p", false, "Prompt for password")
 	rootCmd.AddCommand(diffCmd)
 }

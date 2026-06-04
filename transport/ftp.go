@@ -58,9 +58,7 @@ func (t *ftpTransport) ensureRemoteDir(client *ftp.ServerConn, dir string) error
 		} else {
 			current += "/" + part
 		}
-		if err := client.MakeDir(current); err != nil {
-			return err
-		}
+		client.MakeDir(current) // best-effort: ignore errors (dir may already exist)
 	}
 	return nil
 }
@@ -169,7 +167,11 @@ func (t *ftpTransport) Delete(remoteRelPath string) error {
 func (t *ftpTransport) FileExists(remoteRelPath string) (bool, int64, error) {
 	size, err := t.client.FileSize(t.remotePath(remoteRelPath))
 	if err != nil {
-		return false, 0, nil
+		// FileSize returns an error with status 550 if file doesn't exist
+		if strings.Contains(err.Error(), "550") {
+			return false, 0, nil
+		}
+		return false, 0, err
 	}
 	return true, size, nil
 }

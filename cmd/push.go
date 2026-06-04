@@ -171,8 +171,8 @@ You can specify specific files/directories to push selectively:
 						deletePaths[i] = c.Path
 					}
 					version.BackupDeletedFiles(versionName, deletePaths, tr)
-					tr.Close()
 				}
+				tr.Close()
 			}
 		}
 
@@ -190,11 +190,11 @@ You can specify specific files/directories to push selectively:
 					errCh <- err
 					return
 				}
+				defer tr.Close()
 				if err := tr.Connect(); err != nil {
 					errCh <- fmt.Errorf("worker %d connect: %w", id, err)
 					return
 				}
-				defer tr.Close()
 
 				for path := range uploads {
 					count := atomic.AddInt64(&completed, 1)
@@ -231,8 +231,10 @@ You can specify specific files/directories to push selectively:
 				return err
 			}
 			if err := tr.Connect(); err != nil {
+				tr.Close()
 				return fmt.Errorf("connecting for deletes: %w", err)
 			}
+			defer tr.Close()
 			for _, c := range toDelete {
 				count := atomic.AddInt64(&completed, 1)
 				if !pushQuiet {
@@ -242,7 +244,6 @@ You can specify specific files/directories to push selectively:
 					fmt.Fprintf(os.Stderr, "warning: deleting %s: %v\n", c.Path, err)
 				}
 			}
-			tr.Close()
 		}
 
 		newIdx, err := index.BuildIndex(".", ignorePatterns)
@@ -258,17 +259,21 @@ You can specify specific files/directories to push selectively:
 			return err
 		}
 		if err := tr.Connect(); err != nil {
+			tr.Close()
 			return fmt.Errorf("connecting for index sync: %w", err)
 		}
+		defer tr.Close()
+
 		if err := transport.SyncIndexToRemote(tr, newIdx); err != nil {
 			fmt.Fprintf(os.Stderr, "warning: syncing remote index: %v\n", err)
 		}
 
 		if versionName != "" {
-			version.Save(versionName)
+			if err := version.Save(versionName); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: saving version %s: %v\n", versionName, err)
+			}
 			syncVersionToRemote(versionName, tr)
 		}
-		tr.Close()
 
 		if pwdSource == passwordVault {
 			util.RotateSecret(remoteName)
@@ -412,5 +417,6 @@ func init() {
 	pushCmd.Flags().BoolVarP(&pushQuiet, "quiet", "q", false, "Suppress progress output")
 	pushCmd.Flags().StringSliceVar(&pushInclude, "include", nil, "Only include files matching pattern (can repeat)")
 	pushCmd.Flags().StringSliceVar(&pushExclude, "exclude", nil, "Exclude files matching pattern (can repeat)")
+	pushCmd.Flags().BoolVar(&pushNoVersion, "no-version", false, "Do not auto-create a version snapshot")
 	rootCmd.AddCommand(pushCmd)
 }

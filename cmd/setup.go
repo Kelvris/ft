@@ -76,13 +76,14 @@ Creates .ft/ if it doesn't exist. No arguments needed — just run:
 			return fmt.Errorf("creating transport: %w", err)
 		}
 		if err := t.Connect(); err != nil {
+			t.Close()
 			return fmt.Errorf("connection failed: %w", err)
 		}
+		defer t.Close()
 		fmt.Println("Connected!")
 		fmt.Println()
 
 		chosenPath, err := browseDirectories(t, "/")
-		t.Close()
 		if err != nil {
 			return err
 		}

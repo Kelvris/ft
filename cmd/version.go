@@ -28,7 +28,10 @@ var versionLsCmd = &cobra.Command{
 			remoteName = args[0]
 		}
 
-		local, _ := version.ListLocal()
+		local, err := version.ListLocal()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "warning: listing local versions: %v\n", err)
+		}
 		fmt.Printf("Local versions (%d):\n", len(local))
 		if len(local) == 0 {
 			fmt.Println("  (none)")

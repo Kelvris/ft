@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 )
 
 const FtDir = ".ft"
@@ -44,6 +43,4 @@ func FormatBytes(b int64) string {
 	return fmt.Sprintf("%.1f %cB", float64(b)/float64(div), "KMGTPE"[exp])
 }
 
-func IsHiddenOrMeta(name string) bool {
-	return strings.HasPrefix(name, ".") || name == FtDir
-}
+

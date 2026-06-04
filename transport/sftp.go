@@ -213,9 +213,17 @@ func (t *sftpTransport) ListDir(remoteDir string) ([]DirEntry, error) {
 func (t *sftpTransport) Delete(remoteRelPath string) error {
 	p := t.remotePath(remoteRelPath)
 	if err := t.client.Remove(p); err != nil {
+		// Check if it's a directory
 		stat, statErr := t.client.Stat(p)
-		if statErr != nil || stat.IsDir() {
-			return t.client.RemoveDirectory(p)
+		if statErr != nil {
+			// File doesn't exist or can't be stat'd - return original error
+			return fmt.Errorf("deleting %s: %w", remoteRelPath, err)
+		}
+		if stat.IsDir() {
+			if err := t.client.RemoveDirectory(p); err != nil {
+				return fmt.Errorf("removing directory %s: %w", remoteRelPath, err)
+			}
+			return nil
 		}
 		return fmt.Errorf("deleting %s: %w", remoteRelPath, err)
 	}
@@ -268,19 +276,4 @@ func (t *sftpTransport) EnsureDir(remoteRelPath string) error {
 	return t.client.MkdirAll(t.remotePath(remoteRelPath))
 }
 
-func (t *sftpTransport) WalkDir(remoteDir string, fn func(path string, info os.FileInfo) error) error {
-	walker := t.client.Walk(t.remotePath(remoteDir))
-	for walker.Step() {
-		if walker.Err() != nil {
-			continue
-		}
-		rel, err := filepath.Rel(t.remotePath(remoteDir), walker.Path())
-		if err != nil {
-			continue
-		}
-		if err := fn(rel, walker.Stat()); err != nil {
-			return err
-		}
-	}
-	return nil
-}
+

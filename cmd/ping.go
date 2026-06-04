@@ -38,13 +38,13 @@ var pingCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		defer t.Close()
 
 		start := time.Now()
 		if err := t.Connect(); err != nil {
 			return fmt.Errorf("connection failed: %w", err)
 		}
 		elapsed := time.Since(start)
-		t.Close()
 
 		fmt.Printf("connected to %s://%s:%d%s in %s\n",
 			remote.Protocol, remote.Host, remote.Port, remote.RemotePath, elapsed)

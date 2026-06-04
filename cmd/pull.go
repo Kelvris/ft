@@ -92,8 +92,9 @@ Specify files to pull selectively:
 		if pullBackup {
 			backupName := "pre-pull-" + time.Now().UTC().Format("20060102-150405")
 			if _, err := index.Load(); err == nil {
-				version.Save(backupName)
-				if !pullQuiet {
+				if err := version.Save(backupName); err != nil {
+					fmt.Fprintf(os.Stderr, "warning: failed to backup as version %q: %v\n", backupName, err)
+				} else if !pullQuiet {
 					fmt.Printf("backed up current state as version %q\n", backupName)
 				}
 			}

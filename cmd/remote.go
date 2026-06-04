@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"bufio"
 	"fmt"
 	"os"
 	"strings"
@@ -15,11 +14,12 @@ import (
 
 func promptPassword() (string, error) {
 	fmt.Print("Enter password: ")
-	scanner := bufio.NewScanner(os.Stdin)
-	if !scanner.Scan() {
-		return "", scanner.Err()
+	passwordBytes, err := term.ReadPassword(int(os.Stdin.Fd()))
+	fmt.Println()
+	if err != nil {
+		return "", fmt.Errorf("reading password: %w", err)
 	}
-	return strings.TrimSpace(scanner.Text()), nil
+	return strings.TrimSpace(string(passwordBytes)), nil
 }
 
 var remoteCmd = &cobra.Command{
