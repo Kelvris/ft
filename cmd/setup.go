@@ -62,6 +62,20 @@ Creates .ft/ if it doesn't exist. No arguments needed — just run:
 			password = parsed.Password
 			remotePath = parsed.RemotePath
 			fmt.Printf("Parsed: %s://%s@%s:%d%s\n", protocol, username, host, port, remotePath)
+
+			// Prompt for any fields the URL didn't include
+			if username == "" {
+				username = promptInput("Username", "")
+			}
+			if password == "" {
+				fmt.Printf("Password: ")
+				passwordBytes, err := term.ReadPassword(int(os.Stdin.Fd()))
+				fmt.Println()
+				if err != nil {
+					return fmt.Errorf("reading password: %w", err)
+				}
+				password = string(passwordBytes)
+			}
 		} else {
 			protocol = promptChoice("Protocol", []string{"sftp", "ftp"}, "sftp")
 			defaultPort := map[string]string{"sftp": "22", "ftp": "21"}[protocol]
