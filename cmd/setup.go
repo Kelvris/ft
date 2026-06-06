@@ -37,23 +37,50 @@ Creates .ft/ if it doesn't exist. No arguments needed — just run:
 			cfg.Remotes = make(map[string]*config.Remote)
 		}
 
-		protocol := promptChoice("Protocol", []string{"sftp", "ftp"}, "sftp")
-		host := promptInput("Host", "")
-		defaultPort := map[string]string{"sftp": "22", "ftp": "21"}[protocol]
-		portStr := promptInput("Port", defaultPort)
-		port, _ := strconv.Atoi(portStr)
-		if port == 0 {
-			port, _ = strconv.Atoi(defaultPort)
-		}
-		username := promptInput("Username", "")
+		var (
+			protocol   string
+			port       int
+			username   string
+			password   string
+			remotePath string
+		)
 
-		fmt.Printf("Password: ")
-		passwordBytes, err := term.ReadPassword(int(os.Stdin.Fd()))
-		fmt.Println()
-		if err != nil {
-			return fmt.Errorf("reading password: %w", err)
+		host := promptInput("Host", "")
+
+		if strings.Contains(host, "://") {
+			parsed, err := config.ParseURL(host)
+			if err != nil {
+				return fmt.Errorf("invalid URL: %w", err)
+			}
+			protocol = parsed.Protocol
+			host = parsed.Host
+			port = parsed.Port
+			if port == 0 {
+				port, _ = strconv.Atoi(defaultPortForProtocol(protocol))
+			}
+			username = parsed.Username
+			password = parsed.Password
+			remotePath = parsed.RemotePath
+			fmt.Printf("Parsed: %s://%s@%s:%d%s\n", protocol, username, host, port, remotePath)
+		} else {
+			protocol = promptChoice("Protocol", []string{"sftp", "ftp"}, "sftp")
+			defaultPort := map[string]string{"sftp": "22", "ftp": "21"}[protocol]
+			portStr := promptInput("Port", defaultPort)
+			port, _ = strconv.Atoi(portStr)
+			if port == 0 {
+				port, _ = strconv.Atoi(defaultPortForProtocol(protocol))
+			}
+			username = promptInput("Username", "")
+
+			fmt.Printf("Password: ")
+			passwordBytes, err := term.ReadPassword(int(os.Stdin.Fd()))
+			fmt.Println()
+			if err != nil {
+				return fmt.Errorf("reading password: %w", err)
+			}
+			password = string(passwordBytes)
+			remotePath = "/"
 		}
-		password := string(passwordBytes)
 
 		if host == "" || username == "" {
 			return fmt.Errorf("host and username are required")
@@ -67,7 +94,7 @@ Creates .ft/ if it doesn't exist. No arguments needed — just run:
 			Port:       port,
 			Username:   username,
 			Password:   password,
-			RemotePath: "/",
+			RemotePath: remotePath,
 		}
 		remote.Name = "origin"
 
@@ -83,7 +110,11 @@ Creates .ft/ if it doesn't exist. No arguments needed — just run:
 		fmt.Println("Connected!")
 		fmt.Println()
 
-		chosenPath, err := browseDirectories(t, "/")
+		startPath := "/"
+		if remotePath != "" && remotePath != "/" {
+			startPath = remotePath
+		}
+		chosenPath, err := browseInteractive(t, startPath)
 		if err != nil {
 			return err
 		}
@@ -170,8 +201,23 @@ func promptChoice(label string, options []string, defaultVal string) string {
 	}
 }
 
-func browseDirectories(t transport.Transport, currentPath string) (string, error) {
-	scanner := bufio.NewScanner(os.Stdin)
+func defaultPortForProtocol(protocol string) string {
+	switch protocol {
+	case "ftp":
+		return "21"
+	default:
+		return "22"
+	}
+}
+
+func browseInteractive(t transport.Transport, currentPath string) (string, error) {
+	oldState, err := term.MakeRaw(int(os.Stdin.Fd()))
+	if err != nil {
+		return "", fmt.Errorf("terminal raw mode: %w", err)
+	}
+	defer term.Restore(int(os.Stdin.Fd()), oldState)
+
+	cursor := 0
 
 	for {
 		entries, err := t.ListDir(currentPath)
@@ -192,66 +238,153 @@ func browseDirectories(t transport.Transport, currentPath string) (string, error
 			}
 		}
 
-		display := currentPath
-		if display == "" {
-			display = "/"
-		}
-		fmt.Printf("Contents of %s:\n", display)
-		fmt.Println("  [0] Use this directory")
-		if currentPath != "/" {
-			fmt.Println("  [..] Go up")
-		}
-		if len(dirs) == 0 && len(files) == 0 {
-			fmt.Println("  (empty)")
-		} else {
-			for i, d := range dirs {
-				fmt.Printf("  [%d] /%s/\n", i+1, d.Name)
-			}
-			for i, f := range files {
-				fmt.Printf("  [%d]  %s\n", len(dirs)+i+1, f.Name)
-			}
+		allItems := make([]transport.DirEntry, 0, len(dirs)+len(files))
+		allItems = append(allItems, dirs...)
+		allItems = append(allItems, files...)
+
+		maxIdx := len(allItems)
+		if cursor < 0 {
+			cursor = 0
+		} else if cursor > maxIdx {
+			cursor = maxIdx
 		}
 
-		fmt.Print("\n> ")
-		if !scanner.Scan() {
-			return currentPath, nil
-		}
-		input := strings.TrimSpace(scanner.Text())
+		renderBrowser(currentPath, dirs, files, cursor)
 
-		if input == "" {
-			return currentPath, nil
-		}
-		if input == ".." {
-			if currentPath == "/" || currentPath == "" {
+		key := readKey()
+
+		switch key {
+		case "up":
+			if cursor > 0 {
+				cursor--
+			}
+		case "down":
+			if cursor < maxIdx {
+				cursor++
+			}
+		case "enter", "select":
+			if cursor == 0 {
+				return currentPath, nil
+			}
+			selected := allItems[cursor-1]
+			if !selected.IsDir {
+				fmt.Printf("\r\x1b[K%s is not a directory. Press any key.", selected.Name)
+				readKey()
 				continue
 			}
+			currentPath = joinPath(currentPath, selected.Name)
+			cursor = 0
+		case "right":
+			if cursor > 0 {
+				selected := allItems[cursor-1]
+				if selected.IsDir {
+					currentPath = joinPath(currentPath, selected.Name)
+					cursor = 0
+				}
+			}
+		case "left", "backspace", "esc":
+			if currentPath == "/" || currentPath == "" {
+				return currentPath, nil
+			}
 			currentPath = parentPath(currentPath)
-			continue
+			cursor = 0
+		case "quit":
+			return "", nil
 		}
-
-		dirNum, err := strconv.Atoi(input)
-		if err != nil {
-			fmt.Println("enter 0 to select, number to enter directory, or .. to go up")
-			continue
-		}
-		if dirNum == 0 {
-			return currentPath, nil
-		}
-
-		all := append(dirs, files...)
-		if dirNum < 1 || dirNum > len(all) {
-			fmt.Printf("enter 1-%d\n", len(all))
-			continue
-		}
-
-		selected := all[dirNum-1]
-		if !selected.IsDir {
-			fmt.Printf("%s is not a directory\n", selected.Name)
-			continue
-		}
-
-		currentPath = joinPath(currentPath, selected.Name)
 	}
+}
+
+func readKey() string {
+	buf := make([]byte, 3)
+	n, err := os.Stdin.Read(buf)
+	if err != nil || n == 0 {
+		return "quit"
+	}
+
+	switch {
+	case buf[0] == 13 || buf[0] == 10:
+		return "enter"
+	case buf[0] == 27 && n >= 3:
+		if buf[1] == 91 {
+			// Drain any remaining bytes in the buffer (extended sequences)
+			drain := make([]byte, 4)
+			for i := 0; i < 10; i++ {
+				if _, err := os.Stdin.Read(drain); err != nil {
+					break
+				}
+			}
+			switch buf[2] {
+			case 65:
+				return "up"
+			case 66:
+				return "down"
+			case 67:
+				return "right"
+			case 68:
+				return "left"
+			}
+		}
+		return "esc"
+	case buf[0] == 27:
+		return "esc"
+	case buf[0] == 127 || buf[0] == 8:
+		return "backspace"
+	case buf[0] == 'q' || buf[0] == 'Q':
+		return "quit"
+	case buf[0] == '0':
+		return "select"
+	}
+	return ""
+}
+
+func sanitizeName(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		if r >= 32 && r != 127 {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+func renderBrowser(currentPath string, dirs, files []transport.DirEntry, cursor int) {
+	fmt.Print("\x1b[H\x1b[2J")
+
+	display := currentPath
+	if display == "" {
+		display = "/"
+	}
+	fmt.Printf("Contents of %s:\n", display)
+
+	if cursor == 0 {
+		fmt.Printf("  \x1b[7m[0] Use this directory\x1b[0m\n")
+	} else {
+		fmt.Printf("  [0] Use this directory\n")
+	}
+
+	if currentPath != "/" && currentPath != "" {
+		fmt.Println("  [..] Go up (Left/Backspace)")
+	}
+
+	idx := 1
+	for _, d := range dirs {
+		if cursor == idx {
+			fmt.Printf("  \x1b[7m[%d] /%s/\x1b[0m\n", idx, sanitizeName(d.Name))
+		} else {
+			fmt.Printf("  [%d] /%s/\n", idx, sanitizeName(d.Name))
+		}
+		idx++
+	}
+	for _, f := range files {
+		if cursor == idx {
+			fmt.Printf("  \x1b[7m[%d]  %s\x1b[0m\n", idx, sanitizeName(f.Name))
+		} else {
+			fmt.Printf("  [%d]  %s\n", idx, sanitizeName(f.Name))
+		}
+		idx++
+	}
+
+	fmt.Print("\nArrow keys to navigate, Enter to select, Left/Backspace to go up, q to cancel")
 }
 
 func parentPath(p string) string {
