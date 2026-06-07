@@ -117,7 +117,7 @@ Specify files to pull selectively:
 
 		remoteIdx, err := transport.FetchIndexFromRemote(t)
 		if err != nil {
-			return fmt.Errorf("fetching remote index: %w", err)
+			return fmt.Errorf("cannot pull: %v\n  Upload files first with:   ft push %s\n  Download single file with: ft restore <path>", err, remoteName)
 		}
 
 		if !pullQuiet {

@@ -53,7 +53,7 @@ func SyncIndexToRemote(t Transport, idx *index.Index) error {
 func FetchIndexFromRemote(t Transport) (*index.Index, error) {
 	data, err := t.ReadFile(".ft/index.json")
 	if err != nil {
-		return nil, fmt.Errorf("remote has no index (push first): %w", err)
+		return nil, fmt.Errorf("reading remote index: %w", err)
 	}
 	var idx index.Index
 	if err := json.Unmarshal(data, &idx); err != nil {

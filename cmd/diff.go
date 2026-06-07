@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/Kelvris/ft/config"
 	"github.com/Kelvris/ft/index"
@@ -51,13 +52,34 @@ For modified files, shows a unified diff if 'diff' is available.`,
 		}
 		defer t.Close()
 
-		localIdx, err := index.Load()
+		ignorePatterns, err := index.LoadIgnorePatterns()
 		if err != nil {
 			return err
 		}
 
+		localIdx, err := index.BuildIndex(".", ignorePatterns)
+		if err != nil {
+			return fmt.Errorf("building local index: %w", err)
+		}
+
 		remoteIdx, err := transport.FetchIndexFromRemote(t)
 		if err != nil {
+			// FetchIndexFromRemote returns "reading remote index: ..." when the
+			// remote .ft/index.json is missing or unreadable.  Treat that as "no
+			// remote index" rather than a hard error so we can still show local-only
+			// files.  Other errors (connection, auth, etc.) are surfaced as-is.
+			if strings.HasPrefix(err.Error(), "reading remote index:") {
+				fmt.Fprintf(os.Stderr, "warning: remote has no tracked files\n")
+				for path := range localIdx.Files {
+					fmt.Printf("local-only:  %s\n", path)
+				}
+				if len(localIdx.Files) == 0 {
+					fmt.Println("local and remote are in sync")
+				} else {
+					fmt.Printf("\n%d file(s) differ\n", len(localIdx.Files))
+				}
+				return nil
+			}
 			return fmt.Errorf("fetching remote index: %w", err)
 		}
 
