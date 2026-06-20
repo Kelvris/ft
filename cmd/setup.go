@@ -239,77 +239,69 @@ func browseInteractive(t transport.Transport, currentPath string) (string, error
 			return "", fmt.Errorf("listing %s: %w", currentPath, err)
 		}
 
+		// Only show directories — files are irrelevant for path selection
 		dirs := []transport.DirEntry{}
-		files := []transport.DirEntry{}
 		for _, e := range entries {
 			if strings.HasPrefix(e.Name, ".") {
 				continue
 			}
 			if e.IsDir {
 				dirs = append(dirs, e)
-			} else {
-				files = append(files, e)
 			}
 		}
 
-		allItems := make([]transport.DirEntry, 0, len(dirs)+len(files))
-		allItems = append(allItems, dirs...)
-		allItems = append(allItems, files...)
-
-		maxIdx := len(allItems)
+		maxIdx := len(dirs)
 		if cursor < 0 {
 			cursor = 0
 		} else if cursor > maxIdx {
 			cursor = maxIdx
 		}
 
-		renderBrowser(currentPath, dirs, files, cursor)
+		renderBrowser(currentPath, dirs, cursor)
 
 		key := readKey()
 
-		switch key {
-		case "up":
+		switch {
+		case key == "up":
 			if cursor > 0 {
 				cursor--
 			}
-		case "down":
+		case key == "down":
 			if cursor < maxIdx {
 				cursor++
 			}
-		case "enter", "select":
+		case key == "enter":
 			if cursor == 0 {
 				return currentPath, nil
 			}
-			selected := allItems[cursor-1]
-			if !selected.IsDir {
-				fmt.Printf("\r\x1b[K%s is not a directory. Press any key.", selected.Name)
-				readKey()
-				continue
-			}
+			selected := dirs[cursor-1]
 			currentPath = joinPath(currentPath, selected.Name)
 			cursor = 0
-		case "right":
+		case key == "right":
 			if cursor > 0 {
-				selected := allItems[cursor-1]
-				if selected.IsDir {
-					currentPath = joinPath(currentPath, selected.Name)
-					cursor = 0
-				}
+				selected := dirs[cursor-1]
+				currentPath = joinPath(currentPath, selected.Name)
+				cursor = 0
 			}
-		case "left", "backspace", "esc":
+		case key == "left" || key == "backspace" || key == "esc":
 			if currentPath == "/" || currentPath == "" {
 				return currentPath, nil
 			}
 			currentPath = parentPath(currentPath)
 			cursor = 0
-		case "quit":
+		case key == "quit":
 			return "", nil
+		default:
+			// Try digit jump — type a number to jump cursor to that entry
+			if n, err := strconv.Atoi(key); err == nil && n >= 0 && n <= maxIdx {
+				cursor = n
+			}
 		}
 	}
 }
 
 func readKey() string {
-	buf := make([]byte, 3)
+	buf := make([]byte, 8)
 	n, err := os.Stdin.Read(buf)
 	if err != nil || n == 0 {
 		return "quit"
@@ -318,15 +310,9 @@ func readKey() string {
 	switch {
 	case buf[0] == 13 || buf[0] == 10:
 		return "enter"
-	case buf[0] == 27 && n >= 3:
-		if buf[1] == 91 {
-			// Drain any remaining bytes in the buffer (extended sequences)
-			drain := make([]byte, 4)
-			for i := 0; i < 10; i++ {
-				if _, err := os.Stdin.Read(drain); err != nil {
-					break
-				}
-			}
+
+	case buf[0] == 27:
+		if n >= 3 && buf[1] == 91 {
 			switch buf[2] {
 			case 65:
 				return "up"
@@ -339,14 +325,15 @@ func readKey() string {
 			}
 		}
 		return "esc"
-	case buf[0] == 27:
-		return "esc"
+
 	case buf[0] == 127 || buf[0] == 8:
 		return "backspace"
+
 	case buf[0] == 'q' || buf[0] == 'Q':
 		return "quit"
-	case buf[0] == '0':
-		return "select"
+
+	case buf[0] >= '0' && buf[0] <= '9':
+		return string(buf[0])
 	}
 	return ""
 }
@@ -361,44 +348,37 @@ func sanitizeName(s string) string {
 	return b.String()
 }
 
-func renderBrowser(currentPath string, dirs, files []transport.DirEntry, cursor int) {
+func renderBrowser(currentPath string, dirs []transport.DirEntry, cursor int) {
 	fmt.Print("\x1b[H\x1b[2J")
 
 	display := currentPath
 	if display == "" {
 		display = "/"
 	}
-	fmt.Printf("Contents of %s:\n", display)
+	fmt.Printf("Contents of %s:\r\n", display)
 
+	// Option 0: use current directory
 	if cursor == 0 {
-		fmt.Printf("  \x1b[7m[0] Use this directory\x1b[0m\n")
+		fmt.Printf("  \x1b[7m[0] Use this directory\x1b[0m\r\n")
 	} else {
-		fmt.Printf("  [0] Use this directory\n")
+		fmt.Printf("  [0] Use this directory\r\n")
 	}
 
 	if currentPath != "/" && currentPath != "" {
-		fmt.Println("  [..] Go up (Left/Backspace)")
+		fmt.Printf("  [..] Go up (Left/Backspace)\r\n")
 	}
 
-	idx := 1
-	for _, d := range dirs {
+	// List directories
+	for i, d := range dirs {
+		idx := i + 1
 		if cursor == idx {
-			fmt.Printf("  \x1b[7m[%d] /%s/\x1b[0m\n", idx, sanitizeName(d.Name))
+			fmt.Printf("  \x1b[7m[%d] /%s/\x1b[0m\r\n", idx, sanitizeName(d.Name))
 		} else {
-			fmt.Printf("  [%d] /%s/\n", idx, sanitizeName(d.Name))
+			fmt.Printf("  [%d] /%s/\r\n", idx, sanitizeName(d.Name))
 		}
-		idx++
-	}
-	for _, f := range files {
-		if cursor == idx {
-			fmt.Printf("  \x1b[7m[%d]  %s\x1b[0m\n", idx, sanitizeName(f.Name))
-		} else {
-			fmt.Printf("  [%d]  %s\n", idx, sanitizeName(f.Name))
-		}
-		idx++
 	}
 
-	fmt.Print("\nArrow keys to navigate, Enter to select, Left/Backspace to go up, q to cancel")
+	fmt.Print("\r\nArrow keys/type number to navigate, Enter to select, Left/Backspace to go up, q to cancel")
 }
 
 func parentPath(p string) string {
