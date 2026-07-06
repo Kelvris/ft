@@ -1,6 +1,6 @@
 # ft — Git-like FTP/SFTP sync tool
 
-[![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE) [![Discord](https://img.shields.io/badge/Discord-elysiummc.xyz-5865F2?logo=discord&logoColor=white)](https://discord.elysiummc.xyz)
+[![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE) [![Discord](https://img.shields.io/badge/Discord-Join-5865F2?logo=discord&logoColor=white)](https://discord.gg/p2CK5guHZx)
 
 `ft` lets you upload and download files between your computer and a web server using **FTP** or **SFTP** — with simple Git-style commands. No more dragging files in FileZilla or guessing which files changed.
 
