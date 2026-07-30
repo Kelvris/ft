@@ -126,6 +126,9 @@ Specify files to pull selectively:
 
 		var toDownload []string
 		for relPath, remoteEntry := range remoteIdx.Files {
+			if index.IsIgnored(relPath, ignorePatterns) {
+				continue
+			}
 			if len(fileArgs) > 0 {
 				match := false
 				for _, arg := range fileArgs {
@@ -139,8 +142,23 @@ Specify files to pull selectively:
 					continue
 				}
 			}
+			if len(pullInclude) > 0 {
+				match := false
+				for _, pattern := range pullInclude {
+					if matched, _ := filepath.Match(pattern, relPath); matched {
+						match = true
+						break
+					}
+				}
+				if !match {
+					continue
+				}
+			}
 
-			localPath := filepath.FromSlash(relPath)
+			localPath, err := util.LocalPath(".", relPath)
+			if err != nil {
+				return fmt.Errorf("invalid path in remote index: %w", err)
+			}
 
 			localExists := true
 			localInfo, err := os.Stat(localPath)
@@ -178,7 +196,6 @@ Specify files to pull selectively:
 			if !pullQuiet {
 				fmt.Println("already up to date")
 			}
-			return nil
 		}
 
 		if pullDryRun {
@@ -192,7 +209,10 @@ Specify files to pull selectively:
 		}
 
 		for i, relPath := range toDownload {
-			localPath := filepath.FromSlash(relPath)
+			localPath, err := util.LocalPath(".", relPath)
+			if err != nil {
+				return fmt.Errorf("invalid path in remote index: %w", err)
+			}
 			if !pullQuiet {
 				fmt.Printf("[%d/%d] downloading %s\n", i+1, len(toDownload), relPath)
 			}
@@ -204,6 +224,15 @@ Specify files to pull selectively:
 		newIdx, err := index.BuildIndex(".", ignorePatterns)
 		if err != nil {
 			return fmt.Errorf("building index: %w", err)
+		}
+		if len(fileArgs) > 0 || len(pullInclude) > 0 || len(pullExclude) > 0 {
+			newIdx, err = index.Load()
+			if err != nil {
+				return fmt.Errorf("loading index for selective pull: %w", err)
+			}
+			for _, relPath := range toDownload {
+				newIdx.Files[relPath] = remoteIdx.Files[relPath]
+			}
 		}
 
 		if err := newIdx.Save(); err != nil {

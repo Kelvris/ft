@@ -19,15 +19,20 @@ func SecretsPath(elem ...string) string {
 	return filepath.Join(parts...)
 }
 
-func GenerateSecretID() string {
+func GenerateSecretID() (string, error) {
 	b := make([]byte, 16)
-	rand.Read(b)
-	return hex.EncodeToString(b)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("generating secret ID: %w", err)
+	}
+	return hex.EncodeToString(b), nil
 }
 
 func SavePassword(remoteName, password string) (string, error) {
 	ensureSecretsDir()
-	id := GenerateSecretID()
+	id, err := GenerateSecretID()
+	if err != nil {
+		return "", err
+	}
 	dir := SecretsPath(id)
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return "", fmt.Errorf("creating secret dir: %w", err)
@@ -87,12 +92,10 @@ func RotateSecret(remoteName string) error {
 		return nil
 	}
 
-	// Shred old password file before deleting
-	if exec.Command("shred", "--version").Run() == nil {
-		exec.Command("shred", "-u", oldPath).Run()
+	newID, err := GenerateSecretID()
+	if err != nil {
+		return err
 	}
-
-	newID := GenerateSecretID()
 	newDir := SecretsPath(newID)
 	if err := os.MkdirAll(newDir, 0700); err != nil {
 		return err
@@ -102,10 +105,16 @@ func RotateSecret(remoteName string) error {
 	}
 
 	if err := saveRegistry(remoteName, newID); err != nil {
+		_ = os.RemoveAll(newDir)
 		return err
 	}
 
-	os.RemoveAll(SecretsPath(oldID))
+	// Only destroy the previous copy after the replacement is written and
+	// registered, otherwise a transient write failure can lose the credential.
+	if exec.Command("shred", "--version").Run() == nil {
+		_ = exec.Command("shred", "-u", oldPath).Run()
+	}
+	_ = os.RemoveAll(SecretsPath(oldID))
 
 	return nil
 }

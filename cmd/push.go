@@ -32,7 +32,7 @@ var (
 type passwordSource int
 
 const (
-	passwordNone   passwordSource = iota
+	passwordNone passwordSource = iota
 	passwordFlag
 	passwordEnv
 	passwordConfig
@@ -241,14 +241,31 @@ You can specify specific files/directories to push selectively:
 					fmt.Printf("[%d/%d] deleting  %s\n", count, total, c.Path)
 				}
 				if err := tr.Delete(c.Path); err != nil {
-					fmt.Fprintf(os.Stderr, "warning: deleting %s: %v\n", c.Path, err)
+					return fmt.Errorf("deleting %s: %w", c.Path, err)
 				}
 			}
 		}
 
-		newIdx, err := index.BuildIndex(".", ignorePatterns)
+		currentIdx, err := index.BuildIndex(".", ignorePatterns)
 		if err != nil {
 			return fmt.Errorf("building index: %w", err)
+		}
+		newIdx := currentIdx
+		if len(fileArgs) > 0 || len(pushInclude) > 0 {
+			newIdx, err = index.Load()
+			if err != nil {
+				return fmt.Errorf("loading index for selective push: %w", err)
+			}
+			for _, change := range toUpload {
+				entry, exists := currentIdx.Files[change.Path]
+				if !exists {
+					return fmt.Errorf("index entry for uploaded file %q is missing", change.Path)
+				}
+				newIdx.Files[change.Path] = entry
+			}
+			for _, change := range toDelete {
+				delete(newIdx.Files, change.Path)
+			}
 		}
 		if err := newIdx.Save(); err != nil {
 			return fmt.Errorf("saving index: %w", err)

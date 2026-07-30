@@ -2,10 +2,10 @@ package cmd
 
 import (
 	"fmt"
-	"path/filepath"
 
 	"github.com/Kelvris/ft/config"
 	"github.com/Kelvris/ft/transport"
+	"github.com/Kelvris/ft/util"
 
 	"github.com/spf13/cobra"
 )
@@ -41,7 +41,10 @@ var restoreCmd = &cobra.Command{
 		}
 		defer t.Close()
 
-		localPath := filepath.FromSlash(remoteFile)
+		localPath, err := util.LocalPath(".", remoteFile)
+		if err != nil {
+			return err
+		}
 		fmt.Printf("downloading %s\n", remoteFile)
 		if err := t.Download(remoteFile, localPath, nil); err != nil {
 			return fmt.Errorf("downloading %s: %w", remoteFile, err)

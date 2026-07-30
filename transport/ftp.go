@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -114,14 +115,22 @@ func (t *ftpTransport) Download(remoteRelPath, localPath string, progress io.Wri
 	}
 	defer resp.Close()
 
-	out, err := os.Create(localPath)
+	out, err := os.CreateTemp(filepath.Dir(localPath), ".ft-download-*")
 	if err != nil {
-		return fmt.Errorf("creating %s: %w", localPath, err)
+		return fmt.Errorf("creating temporary file for %s: %w", localPath, err)
 	}
-	defer out.Close()
+	tmpPath := out.Name()
+	defer os.Remove(tmpPath)
 
 	if _, err := io.Copy(out, resp); err != nil {
+		out.Close()
 		return fmt.Errorf("writing %s: %w", localPath, err)
+	}
+	if err := out.Close(); err != nil {
+		return fmt.Errorf("closing temporary file for %s: %w", localPath, err)
+	}
+	if err := os.Rename(tmpPath, localPath); err != nil {
+		return fmt.Errorf("replacing %s: %w", localPath, err)
 	}
 
 	if progress != nil {

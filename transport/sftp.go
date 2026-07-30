@@ -13,6 +13,7 @@ import (
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
+	"golang.org/x/crypto/ssh/knownhosts"
 
 	"github.com/Kelvris/ft/config"
 )
@@ -30,9 +31,13 @@ func newSFTPTransport(remote *config.Remote) (*sftpTransport, error) {
 func (t *sftpTransport) Connect() error {
 	addr := fmt.Sprintf("%s:%d", t.remote.Host, t.remote.Port)
 
+	hostKeyCallback, err := knownHostsCallback()
+	if err != nil {
+		return err
+	}
 	sshConfig := &ssh.ClientConfig{
 		User:            t.remote.Username,
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		HostKeyCallback: hostKeyCallback,
 		Timeout:         15 * time.Second,
 	}
 
@@ -57,6 +62,19 @@ func (t *sftpTransport) Connect() error {
 	}
 
 	return nil
+}
+
+func knownHostsCallback() (ssh.HostKeyCallback, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("locating home directory for SSH host verification: %w", err)
+	}
+	knownHostsPath := filepath.Join(home, ".ssh", "known_hosts")
+	callback, err := knownhosts.New(knownHostsPath)
+	if err != nil {
+		return nil, fmt.Errorf("loading SSH known hosts from %s: %w (connect once with ssh or add the host key first)", knownHostsPath, err)
+	}
+	return callback, nil
 }
 
 func (t *sftpTransport) buildAuthMethods() []ssh.AuthMethod {
@@ -117,6 +135,11 @@ func (t *sftpTransport) Close() error {
 }
 
 func (t *sftpTransport) remotePath(rel string) string {
+	// Absolute paths are used by the setup browser. Relative sync paths are
+	// resolved below the configured remote root.
+	if path.IsAbs(rel) {
+		return path.Clean(rel)
+	}
 	base := t.remote.RemotePath
 	if base == "" || base == "/" {
 		return path.Join("/", rel)
@@ -167,14 +190,22 @@ func (t *sftpTransport) Download(remoteRelPath, localPath string, progress io.Wr
 	}
 	defer src.Close()
 
-	dst, err := os.Create(localPath)
+	dst, err := os.CreateTemp(filepath.Dir(localPath), ".ft-download-*")
 	if err != nil {
-		return fmt.Errorf("creating %s: %w", localPath, err)
+		return fmt.Errorf("creating temporary file for %s: %w", localPath, err)
 	}
-	defer dst.Close()
+	tmpPath := dst.Name()
+	defer os.Remove(tmpPath)
 
 	if _, err := io.Copy(dst, src); err != nil {
+		dst.Close()
 		return fmt.Errorf("downloading %s: %w", remoteRelPath, err)
+	}
+	if err := dst.Close(); err != nil {
+		return fmt.Errorf("closing temporary file for %s: %w", localPath, err)
+	}
+	if err := os.Rename(tmpPath, localPath); err != nil {
+		return fmt.Errorf("replacing %s: %w", localPath, err)
 	}
 
 	if progress != nil {
@@ -233,7 +264,10 @@ func (t *sftpTransport) Delete(remoteRelPath string) error {
 func (t *sftpTransport) FileExists(remoteRelPath string) (bool, int64, error) {
 	stat, err := t.client.Stat(t.remotePath(remoteRelPath))
 	if err != nil {
-		return false, 0, nil
+		if os.IsNotExist(err) {
+			return false, 0, nil
+		}
+		return false, 0, err
 	}
 	return true, stat.Size(), nil
 }
@@ -275,5 +309,3 @@ func (t *sftpTransport) WriteFile(remoteRelPath string, data []byte) error {
 func (t *sftpTransport) EnsureDir(remoteRelPath string) error {
 	return t.client.MkdirAll(t.remotePath(remoteRelPath))
 }
-
-

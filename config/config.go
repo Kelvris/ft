@@ -36,7 +36,11 @@ func (c *Config) Save() error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0644)
+	// Configs may contain credentials when a remote is added via URL.
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		return err
+	}
+	return os.Chmod(path, 0600)
 }
 
 func LoadConfig() (*Config, error) {
@@ -93,7 +97,7 @@ func ParseURL(rawURL string) (*Remote, error) {
 		}
 	} else {
 		port, err := strconv.Atoi(portStr)
-		if err != nil {
+		if err != nil || port < 1 || port > 65535 {
 			return nil, fmt.Errorf("invalid port %q", portStr)
 		}
 		r.Port = port

@@ -83,6 +83,9 @@ func ListRemote(t transport.Transport) ([]string, error) {
 }
 
 func Save(name string) error {
+	if err := validateName(name); err != nil {
+		return err
+	}
 	idx, err := index.Load()
 	if err != nil {
 		return fmt.Errorf("loading index: %w", err)
@@ -106,6 +109,9 @@ func Save(name string) error {
 }
 
 func LoadVersionIndex(name string) (*index.Index, error) {
+	if err := validateName(name); err != nil {
+		return nil, err
+	}
 	paths := []string{
 		VersionPath(name, "index.json"),
 	}
@@ -143,6 +149,14 @@ func LoadVersionIndex(name string) (*index.Index, error) {
 	return container.Index, nil
 }
 
+func validateName(name string) error {
+	if name == "" || name == "." || name == ".." ||
+		strings.Contains(name, "/") || strings.Contains(name, `\`) {
+		return fmt.Errorf("invalid version name %q: use a single file-name-safe value", name)
+	}
+	return nil
+}
+
 func Revert(name string, t transport.Transport, remotePath string) error {
 	verIdx, err := LoadVersionIndex(name)
 	if err != nil {
@@ -152,7 +166,12 @@ func Revert(name string, t transport.Transport, remotePath string) error {
 	var restored, skipped, failed int
 
 	for path, entry := range verIdx.Files {
-		localPath := filepath.FromSlash(path)
+		localPath, err := util.LocalPath(".", path)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "warning: skipping unsafe version path %q: %v\n", path, err)
+			failed++
+			continue
+		}
 
 		localHash, err := index.FileHash(localPath)
 		if err == nil && localHash == entry.Hash {

@@ -195,7 +195,7 @@ func DetectChanges(root string, ignorePatterns []string) ([]Change, error) {
 	}
 
 	for path := range idx.Files {
-		if !currentFiles[path] && !shouldSkipDir(path) {
+		if !currentFiles[path] && !shouldSkipDir(path) && !isIgnored(path, ignorePatterns) {
 			changes = append(changes, Change{
 				Path:       path,
 				Type:       Deleted,
@@ -354,6 +354,11 @@ func isIgnored(path string, patterns []string) bool {
 		}
 	}
 	return ignored
+}
+
+// IsIgnored reports whether path matches the supplied .ftignore-style patterns.
+func IsIgnored(path string, patterns []string) bool {
+	return isIgnored(filepath.ToSlash(path), patterns)
 }
 
 // Auto-excluded directories (like .ft, .git)

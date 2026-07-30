@@ -11,14 +11,14 @@ import (
 
 func TestConfigParsing(t *testing.T) {
 	tests := []struct {
-		url      string
-		proto    string
-		host     string
-		port     int
-		user     string
-		pass     string
-		remPath  string
-		wantErr  bool
+		url     string
+		proto   string
+		host    string
+		port    int
+		user    string
+		pass    string
+		remPath string
+		wantErr bool
 	}{
 		{"sftp://user@host.com:2222/var/www", "sftp", "host.com", 2222, "user", "", "/var/www", false},
 		{"ftp://u:p@ftp.example.com:21/pub", "ftp", "ftp.example.com", 21, "u", "p", "/pub", false},
@@ -26,6 +26,8 @@ func TestConfigParsing(t *testing.T) {
 		{"ftp://host.com", "ftp", "host.com", 21, "", "", "/", false},
 		{"http://host.com", "", "", 0, "", "", "", true},
 		{"badurl", "", "", 0, "", "", "", true},
+		{"ftp://host.com:0", "", "", 0, "", "", "", true},
+		{"sftp://host.com:65536", "", "", 0, "", "", "", true},
 	}
 
 	for _, tt := range tests {
