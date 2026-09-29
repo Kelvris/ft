@@ -33,14 +33,16 @@ func newSFTPTransport(remote *config.Remote) (*sftpTransport, error) {
 func (t *sftpTransport) Connect() error {
 	addr := fmt.Sprintf("%s:%d", t.remote.Host, t.remote.Port)
 
-	hostKeyCallback, err := knownHostsCallback()
+	hostKeyCallback, knownHostsPath, err := knownHostsCallback()
 	if err != nil {
 		return err
 	}
 	sshConfig := &ssh.ClientConfig{
-		User:            t.remote.Username,
-		HostKeyCallback: hostKeyCallback,
-		Timeout:         15 * time.Second,
+		User: t.remote.Username,
+		HostKeyCallback: trustedHostKeyCallback(
+			hostKeyCallback, knownHostsPath,
+			interactiveHostKeyPrompt(os.Stdout, os.Stdin, knownHostsPath)),
+		Timeout: 15 * time.Second,
 	}
 
 	authMethods := t.buildAuthMethods()
@@ -66,17 +68,27 @@ func (t *sftpTransport) Connect() error {
 	return nil
 }
 
-func knownHostsCallback() (ssh.HostKeyCallback, error) {
+// knownHostsCallback loads ~/.ssh/known_hosts for host-key verification and
+// also returns its path (so unknown hosts can be appended after the user
+// confirms them). A missing file is not an error: every host is then simply
+// unknown and gets the interactive trust prompt on first connect.
+func knownHostsCallback() (ssh.HostKeyCallback, string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return nil, fmt.Errorf("locating home directory for SSH host verification: %w", err)
+		return nil, "", fmt.Errorf("locating home directory for SSH host verification: %w", err)
 	}
 	knownHostsPath := filepath.Join(home, ".ssh", "known_hosts")
 	callback, err := knownhosts.New(knownHostsPath)
 	if err != nil {
-		return nil, fmt.Errorf("loading SSH known hosts from %s: %w (connect once with ssh or add the host key first)", knownHostsPath, err)
+		if os.IsNotExist(err) {
+			callback = func(hostname string, remote net.Addr, key ssh.PublicKey) error {
+				return &knownhosts.KeyError{}
+			}
+			return callback, knownHostsPath, nil
+		}
+		return nil, "", fmt.Errorf("loading SSH known hosts from %s: %w (connect once with ssh or add the host key first)", knownHostsPath, err)
 	}
-	return callback, nil
+	return callback, knownHostsPath, nil
 }
 
 func (t *sftpTransport) buildAuthMethods() []ssh.AuthMethod {
