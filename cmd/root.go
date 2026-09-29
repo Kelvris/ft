@@ -9,7 +9,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var Version = "1.11.0"
+var Version = "1.11.1"
 
 var rootCmd = &cobra.Command{
 	Use:   "ft",
