@@ -10,7 +10,8 @@ If you have a website on shared hosting (like InfinityFree, Hostinger, etc.) and
 
 - **Git-like commands** — `init`, `status`, `push`, `pull`, `log`, `diff`
 - **FTP + SFTP** — works with both protocols
-- **Concurrent uploads** — uploads multiple files at once (faster!)
+- **Safe pull** — three-way comparison like `git pull`: fast-forwards when only the server changed, refuses (exit `1`) instead of clobbering your local edits, and auto-backs-up anything it overwrites
+- **Concurrent transfers** — uploads *and* downloads run in parallel (`--jobs`, default 4)
 - **Password vault** — stores passwords safely in a hidden, rotating folder
 - **Version snapshots** — every push auto-saves a version; revert if something breaks
 - **Interactive setup** — `ft setup` walks you through everything step by step
@@ -103,7 +104,7 @@ This uploads changed files to your server. Only changed files are uploaded — n
 ft pull
 ```
 
-Downloads files from the server that are newer or different.
+Downloads server changes to your laptop. Like `git pull`, it fast-forwards when only the server changed — and refuses (exit `1`) rather than overwriting files you edited yourself.
 
 ### 6. Check connection
 
@@ -126,6 +127,10 @@ ft push             # upload the old working files
 
 # Someone uploaded something to the server directly:
 ft pull             # download it to your laptop
+
+# Both you and the server changed the same file:
+ft pull             # refuses and lists the conflicts (nothing is overwritten)
+ft pull --force     # take the server version anyway (your copy is backed up first)
 
 # You want to deploy just one file:
 ft push origin admin/fix.php
@@ -152,6 +157,7 @@ Flags:
   -p, --password      Prompt for password (ignore saved one)
   -q, --quiet         Less output
       --no-delete     Don't delete files on server
+      --no-version    Don't create a version snapshot for this push
       --include       Only files matching this pattern (repeatable)
       --exclude       Skip files matching this pattern (repeatable)
 ```
@@ -167,21 +173,42 @@ ft push --no-delete             # upload new/changed, but don't remove anything
 ### `ft pull [remote] [files...]`
 Download changed files from your server.
 
+Pull works in three directions, like `git pull`: it compares your last sync
+point (`.ft/index.json`), your working files, and the *actual* server (via
+`Stat`, not just the remote index). Your local edits are never clobbered —
+when both sides changed the same file, pull refuses with a `CONFLICT` report
+and exits `1` without touching anything. When only the server changed it
+fast-forwards; when only you changed, your file is left alone.
+
 ```
 Flags:
   -n, --dry-run       Show what would change, don't download
   -p, --password      Prompt for password
   -q, --quiet         Less output
-      --backup        Save a version before pulling (safety net)
-      --include       Only files matching this pattern
+  -f, --force         Take the server version over local edits (backed up first)
+      --backup        Snapshot your working tree (contents included) before pulling
+      --no-backup     Skip the automatic pre-overwrite snapshot
+      --no-delete     Keep files that were deleted on the server
+  -j, --jobs N        Concurrent downloads (default 4)
+      --scan          Also walk the server tree for files missing from every index
+      --verify        Hash each candidate download (catches same-size server edits)
+      --include       Only files matching this pattern (gitish: '*.php' matches admin/index.php)
       --exclude       Skip files matching this pattern
 ```
+
+Exit codes: `0` success (including "already up to date"), `1` conflicts —
+nothing was changed — or a fatal error (e.g. can't connect), `2` some files
+failed to transfer (the others were applied).
+
+Anything pull overwrites or deletes is copied into a version snapshot first,
+so `ft revert <name>` can bring your bytes back. Untracked local files are
+never absorbed by a pull — they stay untracked until you `ft push` them.
 
 ### `ft status`
 Shows which files are new, modified, or deleted since the last sync.
 
 ### `ft diff [remote]`
-Compares your local files against the server. For changed files, it shows a line-by-line diff (like `git diff`).
+Compares your local files against the actual server (it asks the server directly, so it still works when the remote index is stale). For changed files, it shows a line-by-line diff (like `git diff`).
 
 ### `ft log`
 Shows history of past pushes and pulls.
@@ -258,6 +285,15 @@ Files and folders starting with `.ft` or `.git` are always ignored automatically
 
 If the password comes from the vault, it gets moved to a new random folder after each push/pull (extra security).
 
+## How `ft` tracks files
+
+Everything lives in a hidden `.ft/` folder in your project:
+
+- `.ft/index.json` — your **last sync point** (per-file hash, size, mtime). `ft status` compares your working files against it, and `ft pull` uses it as the "base" of its three-way comparison.
+- `.ft/remote.json` — the last state `ft` actually **observed on the server**, filled in by `pull`, `diff`, and `push`. This is what lets pull detect files changed directly on the server, even when the server's own index is missing or stale (the server's `.ft/index.json` is only a first-run hint).
+- `.ft/versions/` — version snapshots (see below).
+- `.ft/config.json` + vault folder — connection settings, stored per working folder.
+
 ## How versions work
 
 Every `ft push` creates a version snapshot automatically. Versions are stored in `.ft/versions/<name>/`:
@@ -267,6 +303,24 @@ Every `ft push` creates a version snapshot automatically. Versions are stored in
 - `deleted/` — copies of files that were deleted (so you can restore them)
 
 Versions are also synced to your server under `.ft/versions/`, so you can revert even from a different computer.
+
+## Development
+
+```bash
+go build ./... && go vet ./... && go test ./...
+```
+
+Unit tests cover the pull decision matrix (`cmd/pull_plan_test.go`), pathspec
+matching (`index/matchpath_test.go`), and version snapshots (`version`).
+
+There is also an end-to-end harness that runs two simulated machines against a
+local FTP server and asserts the acceptance scenarios (conflict refusal,
+untracked-file isolation, backups/revert, direct server edits, deletions in
+both directions, partial-failure exit code `2`, diff, pull convergence):
+
+```bash
+bash testdata/acceptance.sh   # needs python3 with pyftpdlib installed
+```
 
 ## License
 

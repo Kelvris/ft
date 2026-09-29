@@ -2,8 +2,10 @@ package transport
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net"
 	"os"
 	"path"
@@ -261,15 +263,32 @@ func (t *sftpTransport) Delete(remoteRelPath string) error {
 	return nil
 }
 
-func (t *sftpTransport) FileExists(remoteRelPath string) (bool, int64, error) {
-	stat, err := t.client.Stat(t.remotePath(remoteRelPath))
+// Stat reports the actual server-side state of a path. It returns an error
+// wrapping fs.ErrNotExist when the path does not exist.
+func (t *sftpTransport) Stat(remoteRelPath string) (RemoteInfo, error) {
+	fi, err := t.client.Stat(t.remotePath(remoteRelPath))
 	if err != nil {
 		if os.IsNotExist(err) {
+			return RemoteInfo{}, fmt.Errorf("stat %s: %w", remoteRelPath, fs.ErrNotExist)
+		}
+		return RemoteInfo{}, fmt.Errorf("stat %s: %w", remoteRelPath, err)
+	}
+	return RemoteInfo{
+		Size:  fi.Size(),
+		Mtime: fi.ModTime(),
+		IsDir: fi.IsDir(),
+	}, nil
+}
+
+func (t *sftpTransport) FileExists(remoteRelPath string) (bool, int64, error) {
+	info, err := t.Stat(remoteRelPath)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
 			return false, 0, nil
 		}
 		return false, 0, err
 	}
-	return true, stat.Size(), nil
+	return true, info.Size, nil
 }
 
 func (t *sftpTransport) ReadFile(remoteRelPath string) ([]byte, error) {

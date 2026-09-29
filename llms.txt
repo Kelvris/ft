@@ -1,0 +1,79 @@
+# ft — Git-like FTP/SFTP sync tool
+
+> A single-binary Go CLI that gives FTP and SFTP servers a Git-style workflow: `ft status`, `ft push`, `ft pull`, `ft diff`, `ft log`, `ft revert`. Built for people deploying static sites to shared hosting (InfinityFree, Hostinger) who are tired of dragging files in FileZilla.
+
+`ft` tracks local files in a SHA-256 index under `.ft/`, compares it against the local filesystem to detect added/modified/deleted files, transfers only the differences over FTP or SFTP, and mirrors the index to the server at `.ft/index.json` so any machine can reconcile state. Every push auto-creates a version snapshot that can be reverted later. Passwords live in a rotating vault under `~/.ft/secrets/`. Requires Go 1.26+. MIT licensed.
+
+## Install & entry point
+
+- [README.md](README.md): full user documentation — install, quick start, every command and flag, ignore-file syntax, password precedence, how versions work
+- [main.go](main.go): 7-line entry point; calls `cmd.Execute()`
+- [cmd/root.go](cmd/root.go): root Cobra command, version string (`Version = "1.10.4"`)
+- Install: `go install github.com/Kelvris/ft@latest`
+
+## Commands (package `cmd/`)
+
+- [cmd/push.go](cmd/push.go): upload changed files — concurrent workers, `--jobs` (default 4), `--dry-run`, `--no-delete`, `--include`/`--exclude` (`index.MatchPath`, warns on zero matches), `--no-version`, auto version snapshot + remote index sync, post-upload Stat recorded into `.ft/remote.json`
+- [cmd/pull.go](cmd/pull.go): three-way pull (base / local / actual server) — plans with `planPull`, refuses conflicts with exit 1, partial transfer failures exit 2; flags `-f/--force`, `--backup`, `--no-backup`, `--no-delete`, `-j/--jobs`, `--scan`, `--verify`, `--include`/`--exclude`, `-n/--dry-run`; auto pre-overwrite snapshots; surgical index merge (never rebuilds)
+- [cmd/pull_plan.go](cmd/pull_plan.go): pure `planPull(base, local, remote, planOptions)` — the 10-row git-like decision matrix (`actNone`/`actDownload`/`actDeleteLocal`/`actLeaveAlone`/`actAdvanceBase`/`actConflict`); empty hashes never equal anything
+- [cmd/remotestate.go](cmd/remotestate.go): `.ft/remote.json` last-observed server state — `observeRemote` (Stat per candidate, `--verify` re-hashes), `resolveRemoteHash` (prev → remote-index hint, conservative "" = unknown), `localSide` (nanosecond-precise fast path), `scanRemoteFiles` for `--scan`
+- [cmd/status.go](cmd/status.go): list new/modified/deleted files since last sync (pure local, no network)
+- [cmd/diff.go](cmd/diff.go): compares local files against the *actual* server (same `observeRemote` Stat pass as pull; remote index is only a fallback when the server has no index); shells out to `diff -u` for inline unified diffs
+- [cmd/setup.go](cmd/setup.go): interactive TUI wizard — raw-mode stdin, arrow/number-key remote directory browser, saves remote as `origin`
+- [cmd/init.go](cmd/init.go): create `.ft/` with empty config + index, optionally from a URL
+- [cmd/remote.go](cmd/remote.go): `add`/`ls`/`rm`/`set-password`/`clear-password`; also holds shared `promptPassword()`
+- [cmd/version.go](cmd/version.go): snapshot subcommands `ls` / `save <name>` / `diff <name>`
+- [cmd/revert.go](cmd/revert.go): restore working tree from a snapshot (interactive picker if no name given)
+- [cmd/restore.go](cmd/restore.go): download a single file without full pull logic
+- [cmd/ls.go](cmd/ls.go): list remote directory (`ft ls [remote[/path]]`)
+- [cmd/info.go](cmd/info.go): local + remote stats and connection check
+- [cmd/ping.go](cmd/ping.go): connection test with latency
+- [cmd/log.go](cmd/log.go): reads `.ft/log.json` — see Known gaps below
+
+## Core packages
+
+- [index/index.go](index/index.go): the sync engine — `FileEntry{Hash,Mtime,MtimeNS,Size}` with `SameMtime` (nanosecond-exact, so same-second same-size edits are never missed), `DetectChanges(root, ignorePatterns)`, `BuildIndex`, `FileHash` (SHA-256), `EntryFromFile`, gitish `MatchPath` for `--include`/`--exclude` (`*.php` → `admin/index.php`, `admin/*` covers the subtree), `.ftignore`/`.ftpignore` matching via `matchPattern`/`isIgnored`/`IsIgnored`, auto-skips `.ft/` and `.git/`
+- [transport/transport.go](transport/transport.go): `Transport` interface (Connect, Close, Upload, Download, List, ListDir, Delete, FileExists, ReadFile, WriteFile, EnsureDir, **Stat**, **DownloadVerified**) + `NewTransport` factory + `SyncIndexToRemote`/`FetchIndexFromRemote` + `ErrHashMismatch`
+- [transport/ftp.go](transport/ftp.go): `github.com/jlaffaye/ftp` implementation; CD's into `RemotePath` on connect, best-effort `ensureRemoteDir`, temp-file + rename on download
+- [transport/sftp.go](transport/sftp.go): `github.com/pkg/sftp` + `golang.org/x/crypto/ssh`; agent → keyfile → default keys → password auth chain, strict `known_hosts` verification, joins paths under `RemotePath`
+- [config/config.go](config/config.go): `Config{Remotes map[string]*Remote}` persisted to `.ft/config.json` (mode 0600); `ParseURL` accepts `ftp://` and `sftp://` with defaults 21/22
+- [version/version.go](version/version.go): snapshots at `.ft/versions/<name>/{index.json,files/,deleted/}`; `Save`, `SaveWorkingTree` (content copies, what pull's backups use), `LoadVersionIndex`, `Revert` (restore order: `files/` → `deleted/` → remote), `BackupDeletedFiles`, `ListLocal`, `ListRemote`, `PickVersion`, `validateName`
+- [util/util.go](util/util.go): `FtDir = ".ft"`, **`LocalPath(root, rel)` — path-traversal guard for untrusted remote index paths**, `EnsureDir`, `FormatBytes`
+- [util/secrets.go](util/secrets.go): password vault — `SavePassword`/`LoadPassword`/`RotateSecret`/`ClearPassword`, random 16-byte hex directory IDs under `~/.ft/secrets/`, registry at `registry.json`, best-effort `shred` on rotation
+
+## Data layout
+
+- `.ft/index.json` — local file index (the pull sync point); mirrored to the remote so other machines can pull
+- `.ft/remote.json` — last-observed server state per path (size/mtime/hash); the remote `.ft/index.json` is only a first-run hint
+- `.ft/config.json` — remotes (0600; may contain a password if added by URL)
+- `.ft/versions/<name>/` — `index.json` snapshot + `files/` copies + `deleted/` copies
+- `.ft/log.json` — sync history (written by `appendLog`, currently uncalled)
+- `~/.ft/secrets/<id>/password` + `registry.json` — rotating vault, path is `os.UserHomeDir()`-relative
+- `.ftignore` or `.ftpignore` — gitignore-style patterns; `!` negation supported; `.ft*`/`.git*` always skipped
+
+## Password precedence (first wins)
+
+1. `-p/--password` prompt
+2. `FT_PASSWORD` env var
+3. Password in `.ft/config.json`
+4. Vault via `ft remote set-password`
+
+Vault-sourced passwords are rotated to a fresh directory after each successful push/pull.
+
+## Conventions for AI assistants
+
+- Cobra commands self-register in `init()` via `rootCmd.AddCommand(...)`; never register twice
+- Push opens one `Transport` per worker goroutine (FTP connections are not shareable); deletes and index sync use separate sequential connections
+- Error wrapping uses `fmt.Errorf("...: %w", err)`; user-facing warnings go to `stderr` via `fmt.Fprintf(os.Stderr, "warning: ...")` so quiet mode stays parseable
+- Silent index merge on selective push/pull: when file args or `--include` are present, only the touched entries are merged into the loaded index instead of rebuilding it
+- All remote-supplied paths must pass through `util.LocalPath` before touching the filesystem
+- Verify with `go build ./... && go vet ./... && go test ./...` (tests exist for `cmd` — the `planPull` matrix, remote-state rules, pull candidates — plus `index`, `transport`, `util`, `version`); `config` is untested
+- End-to-end: `bash testdata/acceptance.sh` runs two simulated machines against a local pyftpdlib FTP server (`testdata/ftpsrv.py`) covering conflict refusal, untracked isolation, backups/revert, direct server edits, both deletion directions, partial failure exit 2, diff, and pull convergence
+
+## Known gaps
+
+- `appendLog()` in `cmd/log.go` is defined but never invoked, so `ft log` always reports "no sync history yet"
+- Password resolution is duplicated as `resolvePassword` (push.go) and `resolvePullPassword` (pull.go), each with its own package-level `pwdSource` var; `diff.go` bridges them by assigning `pullPassword = diffPassword`
+- `.ftignore` uses `filepath.Match` semantics — no `**` recursive globs
+- Remote change detection is size/mtime based (one-second FTP resolution): a same-size edit made on the server in the same second as the last observation needs `pull --verify` to be caught
+- `version.Revert` accepts an unused `remotePath` parameter

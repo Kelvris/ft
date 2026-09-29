@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/Kelvris/ft/config"
@@ -21,7 +22,7 @@ var diffCmd = &cobra.Command{
 	Short: "Compare local files against remote",
 	Long: `Downloads the remote index and shows files that differ.
 For modified files, shows a unified diff if 'diff' is available.`,
-	Args:  cobra.MaximumNArgs(1),
+	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		remoteName := "origin"
 		if len(args) > 0 {
@@ -70,7 +71,7 @@ For modified files, shows a unified diff if 'diff' is available.`,
 			// files.  Other errors (connection, auth, etc.) are surfaced as-is.
 			if strings.HasPrefix(err.Error(), "reading remote index:") {
 				fmt.Fprintf(os.Stderr, "warning: remote has no tracked files\n")
-				for path := range localIdx.Files {
+				for _, path := range sortedPaths(localIdx.Files) {
 					fmt.Printf("local-only:  %s\n", path)
 				}
 				if len(localIdx.Files) == 0 {
@@ -83,27 +84,47 @@ For modified files, shows a unified diff if 'diff' is available.`,
 			return fmt.Errorf("fetching remote index: %w", err)
 		}
 
-		var diffs int
+		// Like pull, diff compares against the *actual* server (Stat), not the
+		// remote index alone — files changed directly on the server must show up.
+		candidates := make(map[string]bool, len(localIdx.Files)+len(remoteIdx.Files))
+		for path := range localIdx.Files {
+			candidates[path] = true
+		}
+		for path := range remoteIdx.Files {
+			candidates[path] = true
+		}
+		observed := observeRemote(t, remoteIdx, loadRemoteState(), sortedKeys(candidates), false)
 
-		// Check remote files that differ from local
-		for path, remoteEntry := range remoteIdx.Files {
-			localEntry, exists := localIdx.Files[path]
-			if !exists {
+		var diffs int
+		for _, path := range sortedKeys(candidates) {
+			obs, ok := observed[path]
+			if !ok {
+				continue // stat failed; observeRemote already warned
+			}
+			localEntry, localExists := localIdx.Files[path]
+
+			if !obs.Present {
+				if localExists {
+					fmt.Printf("local-only:  %s\n", path)
+					diffs++
+				}
+				continue
+			}
+			if !localExists {
 				fmt.Printf("remote-only: %s\n", path)
 				diffs++
 				continue
 			}
-			if localEntry.Hash != remoteEntry.Hash {
+			remoteHash := obs.Hash
+			if remoteHash == "" {
+				// Index/size disagree with the server: fetch the truth.
+				if h, ok := verifyRemoteHash(t, path); ok {
+					remoteHash = h
+				}
+			}
+			if remoteHash == "" || remoteHash != localEntry.Hash {
 				fmt.Printf("modified:    %s\n", path)
 				showInlineDiff(t, path)
-				diffs++
-			}
-		}
-
-		// Check local-only files
-		for path := range localIdx.Files {
-			if _, exists := remoteIdx.Files[path]; !exists {
-				fmt.Printf("local-only:  %s\n", path)
 				diffs++
 			}
 		}
@@ -116,6 +137,26 @@ For modified files, shows a unified diff if 'diff' is available.`,
 
 		return nil
 	},
+}
+
+// sortedKeys returns the map keys in a stable order.
+func sortedKeys(set map[string]bool) []string {
+	out := make([]string, 0, len(set))
+	for k := range set {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// sortedPaths returns index paths in a stable order.
+func sortedPaths(files map[string]*index.FileEntry) []string {
+	out := make([]string, 0, len(files))
+	for k := range files {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func showInlineDiff(t transport.Transport, path string) {

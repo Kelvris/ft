@@ -8,9 +8,11 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/Kelvris/ft/util"
 )
@@ -19,6 +21,20 @@ type FileEntry struct {
 	Hash  string `json:"hash"`
 	Mtime int64  `json:"mtime"`
 	Size  int64  `json:"size"`
+	// MtimeNS is the same timestamp at nanosecond resolution. One-second
+	// mtimes cannot tell a same-size rewrite within the same second apart
+	// (git calls this "racy"), so local fast paths compare this when present.
+	MtimeNS int64 `json:"mtime_ns,omitempty"`
+}
+
+// SameMtime reports whether a file's current mtime still matches what the
+// entry recorded. Nanoseconds are exact; entries written before mtime_ns
+// existed fall back to whole seconds.
+func (e *FileEntry) SameMtime(cur time.Time) bool {
+	if e.MtimeNS != 0 {
+		return cur.UnixNano() == e.MtimeNS
+	}
+	return cur.Unix() == e.Mtime
 }
 
 type Index struct {
@@ -171,7 +187,7 @@ func DetectChanges(root string, ignorePatterns []string) ([]Change, error) {
 			return err
 		}
 
-		if info.Size() != entry.Size || info.ModTime().Unix() != entry.Mtime {
+		if info.Size() != entry.Size || !entry.SameMtime(info.ModTime()) {
 			hash, err := FileHash(path)
 			if err != nil {
 				return err
@@ -259,9 +275,10 @@ func BuildIndex(root string, ignorePatterns []string) (*Index, error) {
 		}
 
 		idx.Files[relPath] = &FileEntry{
-			Hash:  hash,
-			Mtime: info.ModTime().Unix(),
-			Size:  info.Size(),
+			Hash:    hash,
+			Mtime:   info.ModTime().Unix(),
+			MtimeNS: info.ModTime().UnixNano(),
+			Size:    info.Size(),
 		}
 
 		return nil
@@ -359,6 +376,52 @@ func isIgnored(path string, patterns []string) bool {
 // IsIgnored reports whether path matches the supplied .ftignore-style patterns.
 func IsIgnored(path string, patterns []string) bool {
 	return isIgnored(filepath.ToSlash(path), patterns)
+}
+
+// MatchPath reports whether relPath matches pattern using gitignore-ish
+// semantics: exact match, directory-prefix match, basename match when the
+// pattern contains no '/', and filepath.Match against the full path for
+// explicit globs. A pattern that matches a parent directory also selects
+// everything below it, so 'admin/*' covers 'admin/sub/page.php'.
+// It is the shared matcher for --include/--exclude filters (a bare '*.php'
+// therefore matches 'admin/index.php').
+// Negation ('!') is not handled here; that belongs to the ignore matcher.
+func MatchPath(pattern, relPath string) bool {
+	if pattern == "" {
+		return false
+	}
+	relPath = filepath.ToSlash(relPath)
+	if matchPattern(relPath, pattern) {
+		return true
+	}
+	for dir := path.Dir(relPath); dir != "." && dir != "/" && dir != ""; dir = path.Dir(dir) {
+		if matchPattern(dir, pattern) {
+			return true
+		}
+	}
+	return false
+}
+
+// EntryFromFile builds a FileEntry from a file on disk (hash, size, mtime).
+// It is the source of truth for index entries written by pull.
+func EntryFromFile(path string) (*FileEntry, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, err
+	}
+	if info.IsDir() {
+		return nil, fmt.Errorf("%s is a directory", path)
+	}
+	hash, err := FileHash(path)
+	if err != nil {
+		return nil, err
+	}
+	return &FileEntry{
+		Hash:    hash,
+		Mtime:   info.ModTime().Unix(),
+		MtimeNS: info.ModTime().UnixNano(),
+		Size:    info.Size(),
+	}, nil
 }
 
 // Auto-excluded directories (like .ft, .git)

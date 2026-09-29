@@ -148,12 +148,12 @@ You can specify specific files/directories to push selectively:
 		if pushDryRun {
 			if !pushQuiet {
 				fmt.Printf("dry run: would push %d file(s)\n", total)
-			}
-			for _, c := range toUpload {
-				fmt.Printf("  upload   %s\n", c.Path)
-			}
-			for _, c := range toDelete {
-				fmt.Printf("  delete   %s\n", c.Path)
+				for _, c := range toUpload {
+					fmt.Printf("  upload   %s\n", c.Path)
+				}
+				for _, c := range toDelete {
+					fmt.Printf("  delete   %s\n", c.Path)
+				}
 			}
 			return nil
 		}
@@ -178,8 +178,13 @@ You can specify specific files/directories to push selectively:
 
 		var completed int64
 		var wg sync.WaitGroup
-		uploads := make(chan string, len(toUpload))
+		uploads := make(chan index.Change, len(toUpload))
 		errCh := make(chan error, len(toUpload))
+
+		// Post-upload server state, recorded in .ft/remote.json so the next
+		// pull starts from what the server really looks like.
+		var obsMu sync.Mutex
+		observed := make(map[string]remoteObs)
 
 		for i := 0; i < pushJobs; i++ {
 			wg.Add(1)
@@ -196,7 +201,8 @@ You can specify specific files/directories to push selectively:
 					return
 				}
 
-				for path := range uploads {
+				for change := range uploads {
+					path := change.Path
 					count := atomic.AddInt64(&completed, 1)
 					if !pushQuiet {
 						fmt.Printf("[%d/%d] uploading %s\n", count, total, path)
@@ -210,12 +216,17 @@ You can specify specific files/directories to push selectively:
 							fmt.Fprintf(os.Stderr, "warning: saving version file %s: %v\n", path, err)
 						}
 					}
+					if obs := observeAfterUpload(tr, path, change.LocalHash); obs != nil {
+						obsMu.Lock()
+						observed[path] = *obs
+						obsMu.Unlock()
+					}
 				}
 			}(i)
 		}
 
 		for _, c := range toUpload {
-			uploads <- c.Path
+			uploads <- c
 		}
 		close(uploads)
 		wg.Wait()
@@ -243,6 +254,9 @@ You can specify specific files/directories to push selectively:
 				if err := tr.Delete(c.Path); err != nil {
 					return fmt.Errorf("deleting %s: %w", c.Path, err)
 				}
+				obsMu.Lock()
+				observed[c.Path] = remoteObs{StatOK: true}
+				obsMu.Unlock()
 			}
 		}
 
@@ -283,6 +297,16 @@ You can specify specific files/directories to push selectively:
 
 		if err := transport.SyncIndexToRemote(tr, newIdx); err != nil {
 			fmt.Fprintf(os.Stderr, "warning: syncing remote index: %v\n", err)
+		}
+
+		if len(observed) > 0 {
+			remoteState := loadRemoteState()
+			for relPath, obs := range observed {
+				remoteState.record(relPath, obs)
+			}
+			if err := remoteState.Save(); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: saving remote state: %v\n", err)
+			}
 		}
 
 		if versionName != "" {
@@ -340,6 +364,7 @@ func filterChanges(changes []index.Change, fileArgs, includePatterns []string) [
 		return changes
 	}
 
+	includeHits := make([]int, len(includePatterns))
 	var filtered []index.Change
 	for _, c := range changes {
 		if len(fileArgs) > 0 {
@@ -357,10 +382,10 @@ func filterChanges(changes []index.Change, fileArgs, includePatterns []string) [
 		}
 		if len(includePatterns) > 0 {
 			match := false
-			for _, pat := range includePatterns {
-				if matched, _ := filepath.Match(pat, c.Path); matched {
+			for i, pat := range includePatterns {
+				if index.MatchPath(pat, c.Path) {
 					match = true
-					break
+					includeHits[i]++
 				}
 			}
 			if !match {
@@ -369,7 +394,26 @@ func filterChanges(changes []index.Change, fileArgs, includePatterns []string) [
 		}
 		filtered = append(filtered, c)
 	}
+	for i, pat := range includePatterns {
+		if includeHits[i] == 0 {
+			fmt.Fprintf(os.Stderr, "warning: --include %q matched 0 files\n", pat)
+		}
+	}
 	return filtered
+}
+
+// observeAfterUpload stats a freshly uploaded file so .ft/remote.json can
+// record the server's real size/mtime (plus the hash we just sent).
+func observeAfterUpload(t transport.Transport, relPath, hash string) *remoteObs {
+	info, err := t.Stat(relPath)
+	if err != nil || info.IsDir {
+		return nil
+	}
+	obs := &remoteObs{StatOK: true, Present: true, Size: info.Size, Hash: hash}
+	if !info.Mtime.IsZero() {
+		obs.Mtime = info.Mtime.Unix()
+	}
+	return obs
 }
 
 func retryUpload(t transport.Transport, local, remote string, attempts int) error {

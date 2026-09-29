@@ -2,8 +2,11 @@ package transport
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
+	"net/textproto"
 	"os"
 	"path"
 	"path/filepath"
@@ -14,6 +17,18 @@ import (
 
 	"github.com/Kelvris/ft/config"
 )
+
+// ftpStatusFileUnavailable is the FTP reply code used for "no such file" and
+// for permission errors alike (RFC 959).
+const ftpStatusFileUnavailable = 550
+
+func ftpStatusCode(err error) int {
+	var te *textproto.Error
+	if errors.As(err, &te) {
+		return te.Code
+	}
+	return 0
+}
 
 type ftpTransport struct {
 	client *ftp.ServerConn
@@ -92,6 +107,10 @@ func (t *ftpTransport) Upload(localPath, remoteRelPath string, progress io.Write
 		t.ensureRemoteDir(t.client, parent)
 	}
 
+	// Binary mode: ASCII mode silently rewrites line endings, which would make
+	// content hashes disagree between local and remote.
+	_ = t.client.Type(ftp.TransferTypeBinary)
+
 	remoteFile := t.remotePath(remoteRelPath)
 	if err := t.client.Stor(remoteFile, f); err != nil {
 		return fmt.Errorf("uploading %s: %w", remoteRelPath, err)
@@ -109,6 +128,7 @@ func (t *ftpTransport) Download(remoteRelPath, localPath string, progress io.Wri
 	}
 
 	remoteFile := t.remotePath(remoteRelPath)
+	_ = t.client.Type(ftp.TransferTypeBinary)
 	resp, err := t.client.Retr(remoteFile)
 	if err != nil {
 		return fmt.Errorf("downloading %s: %w", remoteRelPath, err)
@@ -173,16 +193,44 @@ func (t *ftpTransport) Delete(remoteRelPath string) error {
 	return nil
 }
 
-func (t *ftpTransport) FileExists(remoteRelPath string) (bool, int64, error) {
-	size, err := t.client.FileSize(t.remotePath(remoteRelPath))
+// Stat reports the actual server-side state of a path. It returns an error
+// wrapping fs.ErrNotExist when the path does not exist.
+func (t *ftpTransport) Stat(remoteRelPath string) (RemoteInfo, error) {
+	remoteFile := t.remotePath(remoteRelPath)
+	var info RemoteInfo
+
+	size, err := t.client.FileSize(remoteFile)
 	if err != nil {
-		// FileSize returns an error with status 550 if file doesn't exist
-		if strings.Contains(err.Error(), "550") {
+		if ftpStatusCode(err) == ftpStatusFileUnavailable {
+			// SIZE is file-only; directories (and missing paths) land here.
+			if entry, entryErr := t.client.GetEntry(remoteFile); entryErr == nil {
+				info.IsDir = entry.Type == ftp.EntryTypeFolder
+				info.Size = int64(entry.Size)
+				info.Mtime = entry.Time
+				return info, nil
+			}
+			return RemoteInfo{}, fmt.Errorf("stat %s: %w", remoteRelPath, fs.ErrNotExist)
+		}
+		return RemoteInfo{}, fmt.Errorf("stat %s: %w", remoteRelPath, err)
+	}
+	info.Size = size
+	if t.client.IsGetTimeSupported() {
+		if mtime, mtimeErr := t.client.GetTime(remoteFile); mtimeErr == nil {
+			info.Mtime = mtime
+		}
+	}
+	return info, nil
+}
+
+func (t *ftpTransport) FileExists(remoteRelPath string) (bool, int64, error) {
+	info, err := t.Stat(remoteRelPath)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
 			return false, 0, nil
 		}
 		return false, 0, err
 	}
-	return true, size, nil
+	return true, info.Size, nil
 }
 
 func (t *ftpTransport) ReadFile(remoteRelPath string) ([]byte, error) {

@@ -108,6 +108,46 @@ func Save(name string) error {
 	return os.WriteFile(filepath.Join(dir, "index.json"), idxData, 0644)
 }
 
+// SaveWorkingTree snapshots the *content* of the given paths (in addition to
+// the index snapshot written by Save), so a later Revert can restore work that
+// was never pushed — e.g. local edits about to be overwritten by a pull.
+// Paths are slash-separated relative paths below the working directory.
+func SaveWorkingTree(name string, paths []string) error {
+	if err := Save(name); err != nil {
+		return err
+	}
+	for _, p := range paths {
+		src, err := util.LocalPath(".", p)
+		if err != nil {
+			return fmt.Errorf("unsafe path in backup list: %q", p)
+		}
+		info, err := os.Stat(src)
+		if err != nil {
+			// The file may already be gone; there is nothing to snapshot.
+			continue
+		}
+		if info.IsDir() {
+			continue
+		}
+		dst := VersionPath(name, "files", filepath.ToSlash(p))
+		if err := copyFileContent(src, dst); err != nil {
+			return fmt.Errorf("backing up %s: %w", p, err)
+		}
+	}
+	return nil
+}
+
+func copyFileContent(src, dst string) error {
+	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
+		return err
+	}
+	data, err := os.ReadFile(src)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(dst, data, 0644)
+}
+
 func LoadVersionIndex(name string) (*index.Index, error) {
 	if err := validateName(name); err != nil {
 		return nil, err
@@ -179,25 +219,26 @@ func Revert(name string, t transport.Transport, remotePath string) error {
 			continue
 		}
 
-		deletedSrc := DeletedFilesDir(name)
-		deletedPath := filepath.Join(deletedSrc, path)
-
-		if _, err := os.Stat(deletedPath); err == nil {
-			dest := filepath.Dir(localPath)
-			if err := os.MkdirAll(dest, 0755); err != nil {
-				failed++
+		// Restore order: the snapshot's own content copy first (this is what
+		// makes `ft revert` recover work that was never pushed), then the copy
+		// pushed by `ft push`, and only then the remote server.
+		copies := []string{
+			VersionPath(name, "files", filepath.ToSlash(path)),
+			filepath.Join(DeletedFilesDir(name), filepath.FromSlash(path)),
+		}
+		restoredFromCopy := false
+		for _, src := range copies {
+			if _, err := os.Stat(src); err != nil {
 				continue
 			}
-			data, err := os.ReadFile(deletedPath)
-			if err != nil {
-				failed++
-				continue
-			}
-			if err := os.WriteFile(localPath, data, 0644); err != nil {
-				failed++
-				continue
+			if err := copyFileContent(src, localPath); err != nil {
+				break
 			}
 			restored++
+			restoredFromCopy = true
+			break
+		}
+		if restoredFromCopy {
 			continue
 		}
 
